@@ -21,7 +21,7 @@ namespace SnmpSharpNet
 		/// Constructor
 		/// </summary>
 		public Snmp()
-			:base()
+			:base(useV6: false)
 		{
 			_response = null;
 			_target = null;
