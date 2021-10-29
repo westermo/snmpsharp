@@ -6,10 +6,12 @@ namespace SnmpSharpNet
 {
 	public class Snmp:UdpTransport
 	{
-		/// <summary>
-		/// Internal event to send result of the async request to.
-		/// </summary>
-		protected event SnmpAsyncResponse _response;
+        /// <summary>
+        /// Internal event to send result of the async request to.
+        /// </summary>
+#pragma warning disable CS0414
+        protected event SnmpAsyncResponse _response;
+#pragma warning restore CS0414
 		/// <summary>
 		/// Internal storage for request target information.
 		/// </summary>

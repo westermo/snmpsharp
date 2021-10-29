@@ -8,12 +8,22 @@
     <AssemblyVersion>0.9.6</AssemblyVersion>
     <FileVersion>0.9.6</FileVersion>
     <InformationalVersion>0.9.6</InformationalVersion>
-    <Company>Milan Sinadinovic</Company>
+    <Company>Milan Sinadinovic, Westermo Network Technologies AB</Company>
     <Copyright>Copyright © Milan Sinadinovic 2008 - 2014, Westermo Network Technologies AB 2021-2023</Copyright>
-    <Product>SnmpSharpNet</Product>
-    <Description>dotNet Simple Network Management Protocol Implementation</Description>
+    <Product>Westermo.SnmpSharpNet</Product>
+    <Description>.NET Simple Network Management Protocol Implementation</Description>
     <Title>SnmpSharpNet</Title>
+    <PackageId>WeConfig.$(AssemblyName)</PackageId>
+    <Authors>Milan Sinadinovic, Westermo Network Technologies AB</Authors>
+    <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+    <PackageProjectUrl>https://github.com/westermo/snmpsharp</PackageProjectUrl>
+    <PackageLicenseFile>COPYING</PackageLicenseFile>
+    <Version>$(AssemblyVersion)</Version>
   </PropertyGroup>
+
+  <ItemGroup>
+	<None Include="COPYING" Pack="true" PackagePath="" />
+  </ItemGroup>
 
   <ItemGroup>
     <Folder Include="Properties" />
