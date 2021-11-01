@@ -17,6 +17,7 @@
     <Authors>Milan Sinadinovic, Westermo Network Technologies AB</Authors>
     <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
     <PackageProjectUrl>https://github.com/westermo/snmpsharp</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/westermo/snmpsharp</RepositoryUrl>
     <Version>$(AssemblyVersion)</Version>
   </PropertyGroup>
 
