@@ -17,16 +17,7 @@
     <Authors>Milan Sinadinovic, Westermo Network Technologies AB</Authors>
     <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
     <PackageProjectUrl>https://github.com/westermo/snmpsharp</PackageProjectUrl>
-    <PackageLicenseFile>COPYING</PackageLicenseFile>
     <Version>$(AssemblyVersion)</Version>
   </PropertyGroup>
-
-  <ItemGroup>
-	<None Include="COPYING" Pack="true" PackagePath="" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Folder Include="Properties" />
-  </ItemGroup>
 
 </Project>
