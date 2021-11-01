@@ -15,3 +15,7 @@ The namespace has been prefixed with `Westermo`.
 
 # Document
 [see wiki](https://github.com/rqx110/SnmpSharpNet/wiki) 
+
+# Pipeline statuses
+[![Docker Image CI](https://github.com/westermo/snmpsharp/actions/workflows/docker-image.yml/badge.svg)](https://github.com/westermo/snmpsharp/actions/workflows/docker-image.yml)
+[![CodeQL](https://github.com/westermo/snmpsharp/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/westermo/snmpsharp/actions/workflows/codeql-analysis.yml)
