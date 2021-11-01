@@ -13,7 +13,7 @@
     <Product>Westermo.SnmpSharpNet</Product>
     <Description>.NET Simple Network Management Protocol Implementation</Description>
     <Title>SnmpSharpNet</Title>
-    <PackageId>WeConfig.$(AssemblyName)</PackageId>
+    <PackageId>Westermo.$(AssemblyName)</PackageId>
     <Authors>Milan Sinadinovic, Westermo Network Technologies AB</Authors>
     <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
     <PackageProjectUrl>https://github.com/westermo/snmpsharp</PackageProjectUrl>
