@@ -1,4 +1,8 @@
-﻿0.9.4
+﻿0.9.6
+* Added support for .NET 6
+* Made source tree more Docker friendly for builds (moved source code into `src`)
+* Assemblies are no longer strongly named
+0.9.4
 * added support for 2 phase discovery in async requests (UdpTarget class)
 * removed redundant code from Oid.encode method (thanks a.jackson)
 * changed SnmpExceptions codes so RequestTimeout and InvalidIAgentParameters no longer have the same value (thanks m.mckenna)
