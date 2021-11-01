@@ -12,4 +12,4 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     - name: Build and publish NuGet
-      run: docker build -t westermo/snmpsharp-nuget -f ./PublishNuget.dockerfile . && docker run --rm -e "NUGET_TOKEN=${GITHUB_TOKEN}" -it westermo/snmpsharp-nuget
+      run: docker build -t westermo/snmpsharp-nuget -f ./PublishNuget.dockerfile . && docker run --rm -e "NUGET_TOKEN=${GITHUB_TOKEN}" -t westermo/snmpsharp-nuget
