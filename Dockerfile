@@ -4,4 +4,4 @@ WORKDIR /src
 
 COPY src /src/
 
-CMD ["dotnet", "build", "./SnmpSharpNet.csproj"]
+CMD ["dotnet", "build", "--configuration", "Release", "./SnmpSharpNet.csproj"]
