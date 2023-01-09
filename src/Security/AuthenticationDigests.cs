@@ -32,6 +32,10 @@ namespace SnmpSharpNet
 		/// <summary>
 		/// Authentication protocol is HMAC-SHA1.
 		/// </summary>
-		SHA1
+		SHA1,
+		/// <summary>
+		/// Authentication protocol is HMAC-SHA256.
+		/// </summary>
+		SHA256
 	}
 }
