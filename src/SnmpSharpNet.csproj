@@ -18,7 +18,7 @@
     <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
     <PackageProjectUrl>https://github.com/westermo/snmpsharp</PackageProjectUrl>
     <RepositoryUrl>https://github.com/westermo/snmpsharp</RepositoryUrl>
-    <Version>$(AssemblyVersion)</Version>
+    <Version>$(AssemblyVersion)-wmo1</Version>
   </PropertyGroup>
 
 </Project>
