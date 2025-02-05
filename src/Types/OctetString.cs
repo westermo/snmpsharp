@@ -600,7 +600,14 @@ public class OctetString : AsnType, ICloneable, IComparable<byte[]>, IComparable
         return offset;
     }
 
-    public override int ByteLength => encode(stackalloc byte[_data.Length + MaxHeaderSize]);
+    public override int ByteLength
+    {
+        get
+        {
+            var header = HeaderSize(_data.Length);
+            return header + _data.Length;
+        }
+    }
 
     #endregion Encode and decode methods
 }

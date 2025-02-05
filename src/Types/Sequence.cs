@@ -90,12 +90,9 @@ public class Sequence : AsnType, ICloneable
     /// <param name="buffer">Target buffer</param>
     public override int encode(Span<byte> buffer)
     {
-        var dataLen = 0;
-        if (_data.Length > 0)
-            dataLen = _data.Length;
-        var slice = BuildHeader(buffer, Type, dataLen);
+        var slice = BuildHeader(buffer, Type, _data.Length);
         _data.CopyTo(buffer[slice..]);
-        return dataLen + slice;
+        return _data.Length + slice;
     }
 
     /// <summary>

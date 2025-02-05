@@ -310,12 +310,9 @@ public class VbCollection : AsnType, IEnumerable<Vb>
 
     public override int encode(Span<byte> buffer)
     {
-        Span<byte> tmp = stackalloc byte[MemberByteLength()];
-        var written = 0;
-        foreach (var v in _vbs) written += v.encode(tmp[written..]);
-        var slice = BuildHeader(buffer, Type, tmp.Length);
-        tmp[..written].CopyTo(buffer[slice..]);
-        return written + slice;
+        var written = BuildHeader(buffer, Type, MemberByteLength());
+        foreach (var v in _vbs) written += v.encode(buffer[written..]);
+        return written;
     }
 
     public override int ByteLength

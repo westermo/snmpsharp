@@ -377,40 +377,40 @@ public class Integer32 : AsnType, IComparable<Integer32>, IComparable<int>, IClo
     /// <param name="buffer">Buffer target to write the encoded data</param>
     public override int encode(Span<byte> buffer)
     {
-        var val = _value;
-        Span<byte> b = stackalloc byte[sizeof(int)];
-        b.Clear();
-        BitConverter.TryWriteBytes(b, _value);
+        var slice = BuildHeader(buffer, Type, MemberLength());
+        var encoded = EncodeValue(buffer[slice..]);
+        return slice + encoded;
+    }
 
-        Span<byte> tmp = stackalloc byte[sizeof(int)];
-        tmp.Clear();
+    private int EncodeValue(Span<byte> buffer)
+    {
+        Span<byte> bytes = stackalloc byte[sizeof(int)];
+        BitConverter.TryWriteBytes(bytes, _value);
+
         var length = 0;
 
-        switch (val)
+        switch (_value)
         {
             // if value is negative
             case < 0:
             {
                 for (var i = 3; i >= 0; i--)
-                    if (length > 0 || b[i] != 0xff)
-                        tmp[length++] = b[i];
-
-                switch (length)
                 {
-                    // if the value is -1 then all bytes in an integer are 0xff and will be skipped above
-                    case 0:
-                        tmp[length++] = 0xff;
-                        break;
+                    if (length > 0 || bytes[i] != 0xff)
+                    {
+                        buffer[length++] = bytes[i];
+                    }
                 }
 
-                switch (tmp[0] & 0x80)
+                // if the value is -1 then all bytes in an integer are 0xff and will be skipped above
+                if (length == 0) buffer[length++] = 0xff;
+
+                // make sure value is negative
+                if ((buffer[0] & 0x80) == 0)
                 {
-                    // make sure value is negative
-                    case 0:
-                        tmp[..length].CopyTo(tmp[1..]);
-                        length++;
-                        tmp[0] = 0xff;
-                        break;
+                    buffer[..length].CopyTo(buffer[1..]);
+                    length++;
+                    buffer[0] = 0xff;
                 }
 
                 break;
@@ -422,52 +422,37 @@ public class Integer32 : AsnType, IComparable<Integer32>, IComparable<int>, IClo
             default:
             {
                 for (var i = 3; i >= 0; i--)
-                    if (b[i] != 0 || length > 0)
-                        tmp[length++] = b[i];
-                switch (length)
+                    if (bytes[i] != 0 || length > 0)
+                        buffer[length++] = bytes[i];
+                // if buffer length is 0 then value is 0, and we have to add it to the buffer
+                if (length == 0)
                 {
-                    // if buffer length is 0 then value is 0, and we have to add it to the buffer
-                    case 0:
-                        tmp[length++] = 0;
-                        break;
-                    default:
-                    {
-                        if ((tmp[0] & 0x80) != 0)
-                        {
-                            // first bit of the first byte has to be 0 otherwise value is negative.
-                            tmp[..length].CopyTo(tmp[1..]);
-                            length++;
-                            tmp[0] = 0;
-                        }
-
-                        break;
-                    }
+                    buffer[length++] = 0;
+                }
+                else if ((buffer[0] & 0x80) != 0)
+                {
+                    // first bit of the first byte has to be 0 otherwise value is negative.
+                    buffer[..length].CopyTo(buffer[1..]);
+                    length++;
+                    buffer[0] = 0;
                 }
 
                 break;
             }
         }
 
-        switch (length)
-        {
-            // check for 9 1s at the beginning of the encoded value
-            case > 1 when tmp[0] == 0xff && (tmp[1] & 0x80) != 0:
+        if (length <= 1) return length;
+        // check for 9 1s at the beginning of the encoded value
+        if (buffer[0] != 0xff || (buffer[1] & 0x80) == 0) return length;
+        // first bit of the first byte has to be 0 otherwise value is negative.
+        buffer[..length].CopyTo(buffer[1..]);
+        length++;
+        buffer[0] = 0;
 
-                // first bit of the first byte has to be 0 otherwise value is negative.
-                tmp[..length].CopyTo(tmp[1..]);
-                length++;
-                tmp[0] = 0;
-                break;
-        }
-
-        var encoded = tmp[..length];
-
-        var slice = BuildHeader(buffer, Type, length);
-        encoded.CopyTo(buffer[slice..]);
-        return slice + encoded.Length;
+        return length;
     }
 
-    public static int MaxEncodedSize => MaxHeaderSize + sizeof(int);
+    public const int MaxEncodedSize = MaxHeaderSize + sizeof(int);
 
     /// <summary>
     ///     Used to decode the integer value from the BER buffer.
@@ -541,7 +526,90 @@ public class Integer32 : AsnType, IComparable<Integer32>, IComparable<int>, IClo
         return offset;
     }
 
-    public override int ByteLength => encode(stackalloc byte[MaxEncodedSize]);
+    public override int ByteLength
+    {
+        get
+        {
+            var length = MemberLength();
+            return HeaderSize(length) + length;
+        }
+    }
+
+    private int MemberLength()
+    {
+        Span<byte> bytes = stackalloc byte[sizeof(int)];
+        BitConverter.TryWriteBytes(bytes, Value);
+
+        var length = 0;
+        var zeroth = -1;
+
+        switch (Value)
+        {
+            case < 0:
+            {
+                for (var i = 3; i >= 0; i--)
+                {
+                    if (bytes[i] == 0xff) continue;
+                    zeroth = i;
+                    length += i + 1;
+                    break;
+                }
+
+                if (length == 0)
+                {
+                    length++;
+                }
+
+                if (zeroth != -1)
+                {
+                    if ((bytes[zeroth] & 0x80) == 0)
+                    {
+                        length++;
+                    }
+                }
+
+                break;
+            }
+            case 0:
+                length++;
+                break;
+            default:
+            {
+                for (var i = 3; i >= 0; i--)
+                {
+                    if (bytes[i] == 0) continue;
+                    zeroth = i;
+                    length += i + 1;
+                    break;
+                }
+
+                if (length == 0)
+                {
+                    length++;
+                }
+
+                if (zeroth != -1)
+                {
+                    if ((bytes[zeroth] & 0x80) != 0)
+                    {
+                        length++;
+                    }
+                }
+
+                break;
+            }
+        }
+
+        if (length <= 1) return length;
+        if (zeroth <= 0) return length;
+        var slice = bytes.Slice(zeroth - 1, 2);
+        if (slice[0] == 0xff && (slice[1] & 0x80) != 0)
+        {
+            length++;
+        }
+
+        return length;
+    }
 
     #endregion encode and decode methods
 }

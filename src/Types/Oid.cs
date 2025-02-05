@@ -889,43 +889,36 @@ public sealed class Oid : AsnType, ICloneable, IComparable, IEnumerable<uint>
     public override int encode(Span<byte> buffer)
     {
         var values = _data.AsSpan();
-        var upperLimitLength = (values.Length - 1 /*first two values are merged*/) * sizeof(uint);
-        if (upperLimitLength < sizeof(uint) * 2) upperLimitLength = sizeof(uint) * 2;
+        var length = MemberByteLength();
         //Build header;
-        Span<byte> workingSet = stackalloc byte[upperLimitLength];
+        var slice = BuildHeader(buffer, Type, length);
         if (values.Length < 2)
         {
-            var written = 0;
-            workingSet[written++] = 0;
-            var slice = BuildHeader(buffer, Type, written);
-            workingSet[..written].CopyTo(buffer[slice..]);
-            return written + slice;
+            buffer[slice] = 0;
+            return 1 + slice;
         }
-        else
+
+        // verify that it is a valid object id!
+        if (values[0] > 2)
+            throw new SnmpException("Invalid Object Identifier");
+
+        if (values[1] > 40)
+            throw new SnmpException("Invalid Object Identifier");
+
+        var workingSet = buffer[slice..];
+
+        // add the first oid!
+        var first = (byte)(values[0] * 40 + values[1]);
+        var written = 0;
+        workingSet[written++] = first;
+
+        // encode remaining instance values
+        for (var i = 2; i < values.Length; i++)
         {
-            // verify that it is a valid object id!
-            if (values[0] > 2)
-                throw new SnmpException("Invalid Object Identifier");
-
-            if (values[1] > 40)
-                throw new SnmpException("Invalid Object Identifier");
-
-
-            // add the first oid!
-            var first = (byte)(values[0] * 40 + values[1]);
-            var written = 0;
-            workingSet[written++] = first;
-
-            // encode remaining instance values
-            for (var i = 2; i < values.Length; i++)
-            {
-                written += encodeInstance(values[i], workingSet[written..]);
-            }
-
-            var slice = BuildHeader(buffer, Type, written);
-            workingSet[..written].CopyTo(buffer[slice..]);
-            return written + slice;
+            written += encodeInstance(values[i], workingSet[written..]);
         }
+
+        return written + slice;
     }
 
     /// <summary>
@@ -982,38 +975,34 @@ public sealed class Oid : AsnType, ICloneable, IComparable, IEnumerable<uint>
     /// <returns>Length written</returns>
     private int encodeInstance(uint number, Span<byte> target)
     {
-        switch (number)
+        if (number <= 127)
         {
-            case <= 127:
-                target[0] = (byte)number;
-                return 1;
-            default:
-            {
-                var val = number;
-                Span<byte> tmp = stackalloc byte[sizeof(uint) * 2];
-                Span<byte> b = stackalloc byte[sizeof(uint)];
-                var length = 0;
-                while (val != 0)
-                {
-                    BitConverter.TryWriteBytes(b, val);
-                    var @byte = b[0];
-                    if ((@byte & 0x80) != 0) @byte = (byte)(@byte & ~HIGH_BIT); // clear high bit
-                    val >>= 7; // shift original value by 7 bits
-                    tmp[length++] = @byte;
-                }
-
-                var written = 0;
-                // now we need to reverse the bytes for the final encoding
-                for (var i = length - 1; i >= 0; i--)
-                {
-                    var value = tmp[i];
-                    if (i > 0) value |= HIGH_BIT;
-                    target[written++] = value;
-                }
-
-                return written;
-            }
+            target[0] = (byte)number;
+            return 1;
         }
+
+        Span<byte> tmp = stackalloc byte[sizeof(uint) * 2];
+        Span<byte> b = stackalloc byte[sizeof(uint)];
+        var length = 0;
+        while (number != 0)
+        {
+            BitConverter.TryWriteBytes(b, number);
+            var @byte = b[0];
+            if ((@byte & 0x80) != 0) @byte = (byte)(@byte & ~HIGH_BIT); // clear high bit
+            number >>= 7; // shift original value by 7 bits
+            tmp[length++] = @byte;
+        }
+
+        var written = 0;
+        // now we need to reverse the bytes for the final encoding
+        for (var i = length - 1; i >= 0; i--)
+        {
+            var value = tmp[i];
+            if (i > 0) value |= HIGH_BIT;
+            target[written++] = value;
+        }
+
+        return written;
     }
 
     /// <summary>Decode BER encoded Oid value.</summary>
@@ -1118,5 +1107,53 @@ public sealed class Oid : AsnType, ICloneable, IComparable, IEnumerable<uint>
 
     #endregion Encode & Decode
 
-    public override int ByteLength => encode(stackalloc byte[_data.Length + MaxHeaderSize * sizeof(uint)]);
+    public override int ByteLength
+    {
+        get
+        {
+            var length = MemberByteLength();
+            return length + HeaderSize(length);
+        }
+    }
+
+    private int MemberByteLength()
+    {
+        if (_data.Length < 2)
+        {
+            return 1;
+        }
+
+        var values = _data.AsSpan();
+        var written = 1;
+
+        // encode remaining instance values
+        for (var i = 2; i < values.Length; i++)
+        {
+            written += InstanceByteLength(values[i]);
+        }
+
+        return written;
+    }
+
+    /// <summary>
+    ///     Get the byte length for a single instance
+    /// </summary>
+    /// <param name="number">Instance value</param>
+    /// <returns>Length</returns>
+    private int InstanceByteLength(uint number)
+    {
+        if (number <= 127)
+        {
+            return 1;
+        }
+
+        var length = 0;
+        while (number != 0)
+        {
+            number >>= 7; // shift original value by 7 bits
+            length++;
+        }
+
+        return length;
+    }
 }

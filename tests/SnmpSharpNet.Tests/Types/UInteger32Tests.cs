@@ -29,4 +29,21 @@ public class UInteger32Tests
         @new.decode(buffer, 0);
         await Assert.That(@new).IsEqualTo(initial);
     }
+
+    [Test]
+    [Arguments(uint.MinValue)]
+    [Arguments(1)]
+    [Arguments(64)]
+    [Arguments(123)]
+    [Arguments(128)]
+    [Arguments(30000)]
+    [Arguments(30000000)]
+    [Arguments(uint.MaxValue)]
+    public async Task EnsureLengthCalculationWorks(uint value)
+    {
+        Span<byte> stack = stackalloc byte[UInteger32.MaxEncodedSize];
+        var integer = new UInteger32(value);
+        var result = integer.encode(stack);
+        await Assert.That(result).IsEqualTo(integer.ByteLength);
+    }
 }

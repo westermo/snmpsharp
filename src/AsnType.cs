@@ -163,12 +163,13 @@ public abstract class AsnType : ICloneable
             if (len[i] != 0 || length > 0)
                 buf[length++] = len[i];
         var cut = buf[..length];
-        if(length == 0)
+        if (length == 0)
         {
             cut = buf[..1];
             cut[0] = 0;
             length = 1;
         }
+
         // check for short form encoding
         if (length == 1 && (cut[0] & HIGH_BIT) == 0)
         {
@@ -277,12 +278,13 @@ public abstract class AsnType : ICloneable
         return BuildLength(mb[1..], asnLength) + 1;
     }
 
-    public static int MaxHeaderSize => 2 + sizeof(int);
+    public const int MaxHeaderSize = 2 + sizeof(int);
+
     public static int HeaderSize(int asnLength)
     {
         if (asnLength < 128) return 2;
         var res = 2;
-        while (asnLength > 0)
+        while (asnLength != 0)
         {
             asnLength >>= 8;
             res++;

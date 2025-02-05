@@ -348,29 +348,29 @@ public class Counter64 : AsnType, IComparable<ulong>, IComparable<Counter64>, IC
     /// </param>
     public override int encode(Span<byte> buffer)
     {
+        var slice = BuildHeader(buffer, Type, MemberByteLength());
+        var length = EncodeValue(buffer[slice..]);
+        return slice + length;
+    }
+
+    private int EncodeValue(Span<byte> buffer)
+    {
         Span<byte> b = stackalloc byte[sizeof(ulong)];
         BitConverter.TryWriteBytes(b, _value);
         Span<byte> tmp = stackalloc byte[sizeof(ulong)];
         tmp.Clear();
         var length = 0;
         for (var i = b.Length - 1; i >= 0; i--)
-            if (b[i] != 0 || tmp.Length > 0)
+            if (b[i] != 0 || length > 0)
                 tmp[length++] = b[i];
-        switch (length)
-        {
-            case 0:
-                length++; // value is 0. can't have an empty encoding
-                break;
-        }
-
+        if (length == 0) length++; // value is 0. can't have an empty encoding
         var cut = tmp[..length];
 
-        var slice = BuildHeader(buffer, Type, tmp.Length);
-        cut.CopyTo(buffer[slice..]);
-        return slice + cut.Length;
+        cut.CopyTo(buffer);
+        return length;
     }
 
-    public static int MaxEncodedSize => MaxHeaderSize + sizeof(ulong);
+    public const int MaxEncodedSize = MaxHeaderSize + sizeof(ulong);
 
     /// <summary>
     ///     Decode BER encoded Counter64 value
@@ -433,7 +433,30 @@ public class Counter64 : AsnType, IComparable<ulong>, IComparable<Counter64>, IC
         return offset;
     }
 
-    public override int ByteLength => encode(stackalloc byte[MaxEncodedSize]);
+    public override int ByteLength
+    {
+        get
+        {
+            var length = MemberByteLength();
+            return HeaderSize(length) + length;
+        }
+    }
+
+    private int MemberByteLength()
+    {
+        Span<byte> b = stackalloc byte[sizeof(ulong)];
+        BitConverter.TryWriteBytes(b, Value);
+        var length = 0;
+        for (var i = b.Length - 1; i >= 0; i--)
+        {
+            if (b[i] == 0) continue;
+            length += i + 1;
+            break;
+        }
+
+        if (length == 0) length++; // value is 0. can't have an empty encoding
+        return length;
+    }
 
     #endregion
 }

@@ -320,19 +320,23 @@ public class UInteger32 : AsnType, IComparable<UInteger32>, IComparable<uint>
     /// <param name="buffer">Target buffer. Value is appended to the end of it.</param>
     public override int encode(Span<byte> buffer)
     {
+        var slice = BuildHeader(buffer, Type, MemberByteLength());
+        return EncodeValue(buffer[slice..]) + slice;
+    }
+
+    private int EncodeValue(Span<byte> buffer)
+    {
         Span<byte> b = stackalloc byte[sizeof(uint)];
         BitConverter.TryWriteBytes(b, _value);
-        Span<byte> tmp = stackalloc byte[sizeof(uint) + 1];
-        tmp.Clear();
         var length = 0;
         for (var i = 3; i >= 0; i--)
             if (b[i] != 0 || length > 0)
-                tmp[length++] = b[i];
-        switch (tmp.Length)
+                buffer[length++] = b[i];
+        switch (length)
         {
-            case > 0 when (tmp[0] & 0x80) != 0:
-                tmp[..length].CopyTo(tmp[1..]);
-                tmp[0] = 0;
+            case > 0 when (buffer[0] & 0x80) != 0:
+                buffer[..length].CopyTo(buffer[1..]);
+                buffer[0] = 0;
                 length++;
                 break;
             case 0:
@@ -340,14 +344,38 @@ public class UInteger32 : AsnType, IComparable<UInteger32>, IComparable<uint>
                 break;
         }
 
-        var encoded = tmp[..length];
-        var slice = BuildHeader(buffer, Type, length);
-        encoded.CopyTo(buffer[slice..]);
-        return slice + encoded.Length;
+        return length;
     }
 
-    public static int MaxEncodedSize => MaxHeaderSize + sizeof(uint) + 1;
-    public override int ByteLength => encode(stackalloc byte[MaxEncodedSize]);
+    public const int MaxEncodedSize = MaxHeaderSize + sizeof(uint) + 1;
+
+    public override int ByteLength
+    {
+        get
+        {
+            var member = MemberByteLength();
+            return HeaderSize(member) + member;
+        }
+    }
+
+    private int MemberByteLength()
+    {
+        Span<byte> b = stackalloc byte[sizeof(uint)];
+        BitConverter.TryWriteBytes(b, Value);
+        var length = 0;
+        var zeroth = -1;
+        for (var i = 3; i >= 0; i--)
+        {
+            if (b[i] == 0) continue;
+            zeroth = i;
+            length += i + 1;
+            break;
+        }
+
+        if ((length > 0 && (b[zeroth] & 0x80) != 0) || length == 0) length++;
+
+        return length;
+    }
 
     /// <summary>Decode BER encoded value</summary>
     /// <remarks>

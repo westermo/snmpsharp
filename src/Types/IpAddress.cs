@@ -361,6 +361,11 @@ public sealed class IpAddress : OctetString, IComparable
     /// <exception cref="SnmpException">Parsed data is not in IpAddress format</exception>
     public override int decode(byte[] buffer, int offset)
     {
+        return decode(buffer.AsSpan(), offset);
+    }
+
+    public override int decode(Span<byte> buffer, int offset)
+    {
         offset = base.decode(buffer, offset);
         if (_data.Length == 4) return offset;
         _data = [];
