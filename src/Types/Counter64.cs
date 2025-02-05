@@ -357,16 +357,11 @@ public class Counter64 : AsnType, IComparable<ulong>, IComparable<Counter64>, IC
     {
         Span<byte> b = stackalloc byte[sizeof(ulong)];
         BitConverter.TryWriteBytes(b, _value);
-        Span<byte> tmp = stackalloc byte[sizeof(ulong)];
-        tmp.Clear();
         var length = 0;
         for (var i = b.Length - 1; i >= 0; i--)
             if (b[i] != 0 || length > 0)
-                tmp[length++] = b[i];
+                buffer[length++] = b[i];
         if (length == 0) length++; // value is 0. can't have an empty encoding
-        var cut = tmp[..length];
-
-        cut.CopyTo(buffer);
         return length;
     }
 
@@ -411,7 +406,7 @@ public class Counter64 : AsnType, IComparable<ulong>, IComparable<Counter64>, IC
                 throw new OverflowException("Integer too large: cannot decode");
         }
 
-        var tmpBuf = new byte[8]; // we need 8 bytes to represent a UInt64
+        Span<byte> tmpBuf = stackalloc byte[8]; // we need 8 bytes to represent a UInt64
         switch (headerLength)
         {
             case 9:
@@ -428,7 +423,7 @@ public class Counter64 : AsnType, IComparable<ulong>, IComparable<Counter64>, IC
             headerLength -= 1;
         }
 
-        _value = BitConverter.ToUInt64(tmpBuf, 0);
+        _value = BitConverter.ToUInt64(tmpBuf);
 
         return offset;
     }
