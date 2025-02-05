@@ -29,4 +29,22 @@ public class OidTests
         @new.decode(buffer, 0);
         await Assert.That(@new).IsEqualTo(initial);
     }
+
+    [Test]
+    [Arguments("1.3.2.4.1.5.6.8")]
+    [Arguments("1.3.2.4.1.5111.6.8")]
+    [Arguments("1.3.2.4.1123123123.5111.6.8")]
+    public async Task BothMethodsShouldProduceEqualBuffers(string a)
+    {
+        var initial = new Oid(a);
+        Span<byte> buffer = stackalloc byte[initial.ByteLength];
+        initial.encode(buffer);
+        var arr = buffer.ToArray();
+        var secondBuffer = new MutableByte();
+        initial.encode(secondBuffer);
+        for (int i = 0; i < arr.Length; i++)
+        {
+            await Assert.That(arr[i]).IsEqualTo(secondBuffer[i]);
+        }
+    }
 }

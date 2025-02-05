@@ -12,4 +12,8 @@ Console.WriteLine(logger.IsEnabled(LogLevel.Debug));
 using var target = new UdpTarget(IPAddress.Parse(args[0]), 161, 2000, 1);
 var parameters = new AgentParameters(SnmpVersion.Ver2, new OctetString("public"));
 var client = new HighLevelSnmpClient(target, parameters, logger);
-client.WalkTree(new Oid("1"));
+var result = client.WalkTree(new Oid("1"));
+foreach (var pair in result)
+{
+    Console.WriteLine($"{pair.Key} => {pair.Value}");
+}

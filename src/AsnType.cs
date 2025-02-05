@@ -163,22 +163,25 @@ public abstract class AsnType : ICloneable
             if (len[i] != 0 || length > 0)
                 buf[length++] = len[i];
         var cut = buf[..length];
-        switch (length)
+        if(length == 0)
         {
-            // check for short form encoding
-            case 1 when (cut[0] & HIGH_BIT) == 0:
-                mb[0] = cut[0]; // done
-                return 1;
-            default:
-            {
-                // long form encoding
-                var encHeader = (byte)length;
-                encHeader = (byte)(encHeader | HIGH_BIT);
-                mb[0] = encHeader;
-                cut.CopyTo(mb[1..]);
-                return cut.Length + 1;
-            }
+            cut = buf[..1];
+            cut[0] = 0;
+            length = 1;
         }
+        // check for short form encoding
+        if (length == 1 && (cut[0] & HIGH_BIT) == 0)
+        {
+            mb[0] = cut[0]; // done
+            return 1;
+        }
+
+        // long form encoding
+        var encHeader = (byte)length;
+        encHeader = (byte)(encHeader | HIGH_BIT);
+        mb[0] = encHeader;
+        cut.CopyTo(mb[1..]);
+        return cut.Length + 1;
     }
 
     /// <summary>
@@ -200,30 +203,23 @@ public abstract class AsnType : ICloneable
         for (var i = 3; i >= 0; i--)
             if (len[i] != 0 || buf.Length > 0)
                 buf.Append(len[i]);
-        switch (buf.Length)
+        // we are encoding a 0 value. Can't have a 0 byte length encoding
+        if (buf.Length == 0) buf.Append(0);
+
+        // check for short form encoding
+        if (buf.Length == 1 && (buf[0] & HIGH_BIT) == 0)
         {
-            // we are encoding a 0 value. Can't have a 0 byte length encoding
-            case 0:
-                buf.Append(0);
-                break;
+            // done
+        }
+        else
+        {
+            // long form encoding
+            var encHeader = (byte)buf.Length;
+            encHeader = (byte)(encHeader | HIGH_BIT);
+            mb.Append(encHeader);
         }
 
-        switch (buf.Length)
-        {
-            // check for short form encoding
-            case 1 when (buf[0] & HIGH_BIT) == 0:
-                mb.Append(buf); // done
-                break;
-            default:
-            {
-                // long form encoding
-                var encHeader = (byte)buf.Length;
-                encHeader = (byte)(encHeader | HIGH_BIT);
-                mb.Append(encHeader);
-                mb.Append(buf);
-                break;
-            }
-        }
+        mb.Append(buf); // done
     }
 
     /// <summary>
@@ -238,12 +234,11 @@ public abstract class AsnType : ICloneable
         if (offset == mb.Length)
             throw new OverflowException("Buffer is too short.");
         int dataLen;
-        switch (mb[offset] & HIGH_BIT)
+        if ((mb[offset] & HIGH_BIT) == 0)
         {
-            case 0:
-                // short form encoding
-                dataLen = mb[offset++];
-                return dataLen; // we are done
+            // short form encoding
+            dataLen = mb[offset++];
+            return dataLen; // we are done
         }
 
         dataLen = mb[offset++] & ~HIGH_BIT; // store byte length of the encoded length value
@@ -276,14 +271,26 @@ public abstract class AsnType : ICloneable
         BuildLength(mb, asnLength);
     }
 
-    internal static int BuildHeader(Span<byte> mb, byte asnType, int asnLength)
+    public static int BuildHeader(Span<byte> mb, byte asnType, int asnLength)
     {
         mb[0] = asnType;
         return BuildLength(mb[1..], asnLength) + 1;
     }
 
-    internal static int MaxHeaderSize => 2 + sizeof(int);
-    internal static int HeaderSize(int asnLength) => BuildHeader(stackalloc byte[MaxHeaderSize], 0, asnLength);
+    public static int MaxHeaderSize => 2 + sizeof(int);
+    public static int HeaderSize(int asnLength)
+    {
+        if (asnLength < 128) return 2;
+        var res = 2;
+        while (asnLength > 0)
+        {
+            asnLength >>= 8;
+            res++;
+        }
+
+        return res;
+    }
+
     public virtual int ByteLength => HeaderSize(0);
 
     /// <summary>

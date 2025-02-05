@@ -167,6 +167,7 @@ public class SnmpV2Packet : SnmpPacket
     /// <returns>BER encoded SNMP packet.</returns>
     public override byte[] encode()
     {
+     
         if (Pdu.Type != PduType.Get && Pdu.Type != PduType.GetNext &&
             Pdu.Type != PduType.Set && Pdu.Type != PduType.V2Trap &&
             Pdu.Type != PduType.Response && Pdu.Type != PduType.GetBulk &&
@@ -176,10 +177,10 @@ public class SnmpV2Packet : SnmpPacket
 
         var length = _protocolVersion.ByteLength + _snmpCommunity.ByteLength + Pdu.ByteLength;
         var header = AsnType.HeaderSize(length);
-        var result = new byte[length + AsnType.HeaderSize(length)];
-        var buf = result.AsSpan(header, length);
+        Span<byte> buf = stackalloc byte[length + header];
         // snmp version
-        var written = _protocolVersion.encode(buf);
+        var written = 0;
+        written += _protocolVersion.encode(buf[written..]);
 
         // community string
         written += _snmpCommunity.encode(buf[written..]);
@@ -189,8 +190,9 @@ public class SnmpV2Packet : SnmpPacket
 
         // wrap the packet into a sequence
         // wrap the packet into a sequence
-        AsnType.BuildHeader(result.AsSpan(0, header), SnmpConstants.SMI_SEQUENCE, written);
-        return result;
+        buf[..written].CopyTo(buf[header..]);
+        written += AsnType.BuildHeader(buf, SnmpConstants.SMI_SEQUENCE, written);
+        return buf[..written].ToArray();
     }
 
     #endregion

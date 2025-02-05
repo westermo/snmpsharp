@@ -1118,5 +1118,5 @@ public sealed class Oid : AsnType, ICloneable, IComparable, IEnumerable<uint>
 
     #endregion Encode & Decode
 
-    public override int ByteLength => encode(stackalloc byte[_data.Length + MaxHeaderSize]);
+    public override int ByteLength => encode(stackalloc byte[_data.Length + MaxHeaderSize * sizeof(uint)]);
 }

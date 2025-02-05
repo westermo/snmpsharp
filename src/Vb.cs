@@ -182,18 +182,21 @@ public class Vb : AsnType, ICloneable
 
     public override int encode(Span<byte> buffer)
     {
+        var written = BuildHeader(buffer, Type, MemberByteLength());
         // encode oid to the temporary buffer
-        Span<byte> tmp = stackalloc byte[MemberByteLength()];
-        var written = _oid?.encode(tmp) ?? 0;
+        if (_oid is not null)
+        {
+            written += _oid.encode(buffer[written..]);
+        }
+
         // encode value to a temporary buffer
-        written += _value?.encode(tmp[written..]) ?? 0;
+        if (_value is not null)
+        {
+            written += _value.encode(buffer[written..]);
+        }
 
         // calculate data content length of the vb
-        // encode vb header at the end of the result
-        var slice = BuildHeader(buffer, Type, written);
-        // add values to the encoded arrays to the end of the result
-        tmp[..written].CopyTo(buffer[slice..]);
-        return slice + written;
+        return written;
     }
 
     public override int ByteLength
