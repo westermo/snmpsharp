@@ -850,7 +850,7 @@ public class Pdu : AsnType, ICloneable, IEnumerable<Vb>
                 break;
         }
 
-        str.Append("\n");
+        str.Append('\n');
         str.Append($"RequestId: {RequestId}\n");
         if (Type != PduType.GetBulk)
             str.Append($"ErrorStatus: {ErrorStatus}\nError Index: {ErrorIndex}\n");

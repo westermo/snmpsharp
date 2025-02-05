@@ -321,11 +321,7 @@ public class UdpTarget : UdpTransport
     /// <returns>True if async request was successfully initiated, otherwise false.</returns>
     public bool RequestAsync(Pdu pdu, IAgentParameters agentParameters, SnmpAsyncResponse? responseCallback)
     {
-        switch (IsBusy)
-        {
-            case true:
-                return false; // class is busy
-        }
+        if (IsBusy) return false; // class is busy
 
         _response = null;
         _response += responseCallback;
@@ -351,15 +347,11 @@ public class UdpTarget : UdpTransport
                 secparams.InitializePacket(packet);
                 try
                 {
-                    switch (secparams.HasCachedKeys)
+                    outPacket = secparams.HasCachedKeys switch
                     {
-                        case true:
-                            outPacket = packet.encode(secparams.AuthenticationKey, secparams.PrivacyKey);
-                            break;
-                        default:
-                            outPacket = packet.encode();
-                            break;
-                    }
+                        true => packet.encode(secparams.AuthenticationKey, secparams.PrivacyKey),
+                        _ => packet.encode()
+                    };
                 }
                 catch (Exception)
                 {
@@ -411,9 +403,7 @@ public class UdpTarget : UdpTransport
                 throw new SnmpInvalidVersionException("Unsupported SNMP version.");
         }
 
-        if (!base.RequestAsync(_address, _port, outPacket, outPacket.Length, _timeout, _retry, AsyncResponse))
-            return false;
-        return true;
+        return base.RequestAsync(_address, _port, outPacket, outPacket.Length, _timeout, _retry, AsyncResponse);
     }
 
     /// <summary>
