@@ -37,6 +37,11 @@ public enum AuthenticationDigests
     SHA1,
 
     /// <summary>
+    ///     Authentication protocol is HMAC-SHA224.
+    /// </summary>
+    SHA224,
+
+    /// <summary>
     ///     Authentication protocol is HMAC-SHA256.
     /// </summary>
     SHA256,

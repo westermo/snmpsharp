@@ -44,11 +44,8 @@ public class AuthenticationSHA256 : IAuthenticationDigest
     /// <returns>Authentication parameters value</returns>
     public byte[] authenticate(Span<byte> authenticationSecret, Span<byte> engineId, Span<byte> wholeMessage)
     {
-        var result = new byte[authenticationLength];
         var authKey = PasswordToKey(authenticationSecret, engineId);
-        using var sha = new HMACSHA256(authKey);
-        sha.WithHashed(wholeMessage, (span, _) => { span[..authenticationLength].CopyTo(result); });
-        return result;
+        return authenticate(authKey, wholeMessage);
     }
 
     /// <summary>
@@ -139,11 +136,12 @@ public class AuthenticationSHA256 : IAuthenticationDigest
                 remnant = offsetUserPassword.Length - remaining;
             }
 
-            sha.TransformBlock(buf, 0, bufferSize, buf, 0);
+            sha.TransformBlock(buf, 0, bufferSize, null, 0);
             count += bufferSize;
         }
 
         sha.TransformFinalBlock(buf, 0, 0);
+        Array.Clear(buf, 0, bufferSize);
         ArrayPool<byte>.Shared.Return(buf);
 
         var digest = sha.Hash.AsSpan();
@@ -151,7 +149,11 @@ public class AuthenticationSHA256 : IAuthenticationDigest
         digest.CopyTo(source);
         engineID.CopyTo(source[digest.Length..]);
         digest.CopyTo(source[(digest.Length + engineID.Length)..]);
-        return SHA256.HashData(source);
+        var result = SHA256.HashData(source);
+        source.Clear();
+        offsetUserPassword.Clear();
+        tmp.Clear();
+        return result;
     }
 
     /// <summary>

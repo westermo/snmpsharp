@@ -14,24 +14,24 @@
 // along with SNMP#NET.  If not, see <http://www.gnu.org/licenses/>.
 // 
 
-using System;
 using System.Buffers;
-using System.Security.Cryptography;
 
 namespace SnmpSharpNet;
 
+using System;
+
 /// <summary>
-///     SHA-1 Authentication class.
+///     SHA-256 Authentication class.
 /// </summary>
-public class AuthenticationSHA1 : IAuthenticationDigest
+public class AuthenticationSHA224 : IAuthenticationDigest
 {
-    private const int authenticationLength = 12;
-    private const int digestLength = 20;
+    private const int authenticationLength = 21;
+    private const int digestLength = 28;
 
     /// <summary>
     ///     Standard constructor.
     /// </summary>
-    public AuthenticationSHA1()
+    public AuthenticationSHA224()
     {
     }
 
@@ -57,14 +57,13 @@ public class AuthenticationSHA1 : IAuthenticationDigest
     public byte[] authenticate(Span<byte> authKey, Span<byte> wholeMessage)
     {
         var result = new byte[authenticationLength];
-
-        using var sha = new HMACSHA1(authKey.ToArray());
+        using var sha = new HMACSHA224(authKey.ToArray());
         sha.WithHashed(wholeMessage, (span, _) => { span[..authenticationLength].CopyTo(result); });
         return result;
     }
 
     /// <summary>
-    ///     Verifies correct SHA-1 authentication of the frame. Prior to calling this method, you have to extract
+    ///     Verifies correct SHA-224 authentication of the frame. Prior to calling this method, you have to extract
     ///     authentication
     ///     parameters from the wholeMessage and reset authenticationParameters field in the USM information block to 12 0x00
     ///     values.
@@ -82,7 +81,7 @@ public class AuthenticationSHA1 : IAuthenticationDigest
     }
 
     /// <summary>
-    ///     Verify SHA-1 authentication of a packet.
+    ///     Verify SHA-224 authentication of a packet.
     /// </summary>
     /// <param name="authKey">Authentication key (not password)</param>
     /// <param name="authenticationParameters">Authentication parameters extracted from the packet being authenticated</param>
@@ -91,7 +90,7 @@ public class AuthenticationSHA1 : IAuthenticationDigest
     public bool authenticateIncomingMsg(Span<byte> authKey, Span<byte> authenticationParameters,
         Span<byte> wholeMessage)
     {
-        using var sha = new HMACSHA1(authKey.ToArray());
+        using var sha = new HMACSHA224(authKey.ToArray());
         return sha.CompareHashed(wholeMessage, authenticationParameters);
     }
 
@@ -108,7 +107,7 @@ public class AuthenticationSHA1 : IAuthenticationDigest
         // key length has to be at least 8 bytes long (RFC3414)
         if (userPassword.Length < 8)
             throw new SnmpAuthenticationException("Secret key is too short.");
-        using var sha = SHA1.Create();
+        using var sha = SHA224.Create();
 
         var count = 0;
 
@@ -149,7 +148,7 @@ public class AuthenticationSHA1 : IAuthenticationDigest
         digest.CopyTo(source);
         engineID.CopyTo(source[digest.Length..]);
         digest.CopyTo(source[(digest.Length + engineID.Length)..]);
-        var result = SHA1.HashData(source);
+        var result = SHA224.HashData(source);
         source.Clear();
         offsetUserPassword.Clear();
         tmp.Clear();
@@ -169,7 +168,7 @@ public class AuthenticationSHA1 : IAuthenticationDigest
     /// <summary>
     ///     Return authentication protocol name
     /// </summary>
-    public string Name => "HMAC-SHA1";
+    public string Name => "HMAC-SHA256";
 
     /// <summary>
     ///     Compute hash using authentication protocol.
@@ -178,5 +177,5 @@ public class AuthenticationSHA1 : IAuthenticationDigest
     /// <param name="offset">Compute hash from the source buffer offset</param>
     /// <param name="count">Compute hash for source data length</param>
     /// <returns>Hash value</returns>
-    public byte[] ComputeHash(Span<byte> data, int offset, int count) => SHA1.HashData(data.Slice(offset, count));
+    public byte[] ComputeHash(Span<byte> data, int offset, int count) => SHA224.HashData(data.Slice(offset, count));
 }

@@ -53,6 +53,7 @@ public static class Authentication
         {
             AuthenticationDigests.MD5 => new AuthenticationMD5(),
             AuthenticationDigests.SHA1 => new AuthenticationSHA1(),
+            AuthenticationDigests.SHA224 => new AuthenticationSHA224(),
             AuthenticationDigests.SHA256 => new AuthenticationSHA256(),
             AuthenticationDigests.SHA384 => new AuthenticationSHA384(),
             AuthenticationDigests.SHA512 => new AuthenticationSHA512(),

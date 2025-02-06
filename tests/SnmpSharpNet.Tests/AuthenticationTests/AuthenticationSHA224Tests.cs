@@ -2,13 +2,21 @@
 
 namespace SnmpSharpNet.Tests.AuthenticationTests;
 
-public class AuthenticationSHA1Tests
+public class AuthenticationSHA224Tests
 {
     [Test]
     public async Task PasswordToKeyIsConsistent()
     {
-        byte[] knownValue = [244, 32, 233, 153, 218, 11, 16, 149, 144, 15, 37, 54, 199, 4, 195, 123, 70, 5, 174, 226];
-        var auth = new AuthenticationSHA1();
+        byte[] knownValue =
+        [
+            182, 254, 75, 99, 239,
+            67, 36, 225, 119, 242,
+            249, 74, 168, 94, 150,
+            180, 170, 99, 225, 106,
+            227, 211, 146, 83, 63,
+            218, 49, 190
+        ];
+        var auth = new AuthenticationSHA224();
         var password = "password"u8.ToArray();
         var engineId = new byte[] { 0x80, 0x00, 0x13, 0x70, 0x02, 0x01 };
         var key = auth.PasswordToKey(password, engineId);
@@ -18,6 +26,7 @@ public class AuthenticationSHA1Tests
             await Assert.That(key[i]).IsEqualTo(knownValue[i]);
         }
     }
+
     [Test]
     [Arguments(1)]
     [Arguments(2)]
@@ -33,7 +42,7 @@ public class AuthenticationSHA1Tests
     [Arguments(2048)]
     public async Task AnAuthenticatedBufferIsVerifiedByAuthenticateIncomingMessage(int packetLength)
     {
-        var auth = new AuthenticationSHA1();
+        var auth = new AuthenticationSHA224();
         var password = "password"u8.ToArray();
         var engineId = new byte[] { 0x80, 0x00, 0x13, 0x70, 0x02, 0x01 };
         var packet = new byte[packetLength];
@@ -59,7 +68,7 @@ public class AuthenticationSHA1Tests
     public async Task AnAuthenticatedBufferWithTheWrongPasswordIsNotVerifiedByAuthenticateIncomingMessage(
         int packetLength)
     {
-        var auth = new AuthenticationSHA1();
+        var auth = new AuthenticationSHA224();
         var password = "password"u8.ToArray();
         var password2 = "password2"u8.ToArray();
         var engineId = new byte[] { 0x80, 0x00, 0x13, 0x70, 0x02, 0x01 };
@@ -86,7 +95,7 @@ public class AuthenticationSHA1Tests
     public async Task AnAuthenticatedBufferWithTheWrongEngineIdIsNotVerifiedByAuthenticateIncomingMessage(
         int packetLength)
     {
-        var auth = new AuthenticationSHA1();
+        var auth = new AuthenticationSHA224();
         var password = "password"u8.ToArray();
         var engineId = new byte[] { 0x80, 0x00, 0x13, 0x70, 0x02, 0x01 };
         var engineId2 = new byte[] { 0x80, 0x00, 0x13, 0x70, 0x02, 0x02 };
