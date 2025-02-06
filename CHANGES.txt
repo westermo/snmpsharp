@@ -1,4 +1,8 @@
-﻿0.9.7
+﻿0.9.8-wmo1
+* Added SHA224 authentication
+* Fixed a bug in null-object encoding
+* Added more tests and performance improvements.
+0.9.7-wmo1
 * Changed target framework to .NET 9
 * Added span-based API's to many of the types encode and decode functions
 * Added tests and benchmarking capabilities
