@@ -5,16 +5,13 @@ namespace SnmpSharpNet;
 
 static class ShaUtilities
 {
-    #region Functions to convert between byte arrays and uint arrays, and Word64 arrays.
-
-    // Returns an array of 4 bytes.
     public static void UintToByteArray(uint x, Span<byte> span)
     {
         BitConverter.TryWriteBytes(span, x);
         span.Reverse();
     }
 
-    public static void UintArrayToByteArray(Span<uint> words, Span<byte> target)
+    public static void UintArrayToByteArray(ReadOnlySpan<uint> words, Span<byte> target)
     {
         var targetIndex = 0;
 
@@ -38,6 +35,4 @@ static class ShaUtilities
             target[i] = ByteArrayToUint(B[(4 * i)..]);
         }
     }
-
-    #endregion
 }
