@@ -7,8 +7,6 @@ using SnmpSharpNet;
 
 var factory = LoggerFactory.Create(conf => conf.AddConsole().SetMinimumLevel(LogLevel.Debug));
 var logger = factory.CreateLogger<HighLevelSnmpClient>();
-Console.WriteLine(logger.IsEnabled(LogLevel.Debug));
-
 using var target = new UdpTarget(IPAddress.Parse(args[0]), 161, 2000, 1);
 var parameters = new AgentParameters(SnmpVersion.Ver2, new OctetString("public"));
 var client = new HighLevelSnmpClient(target, parameters, logger);
