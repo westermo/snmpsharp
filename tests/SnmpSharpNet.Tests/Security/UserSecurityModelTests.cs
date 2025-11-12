@@ -1,6 +1,4 @@
-﻿using System.Text;
-
-namespace SnmpSharpNet.Tests;
+﻿namespace SnmpSharpNet.Tests.Security;
 
 public class UserSecurityModelTests
 {

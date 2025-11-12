@@ -1,52 +1,43 @@
-﻿using System.Text;
-using BenchmarkDotNet.Attributes;
+﻿using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Jobs;
 
-namespace SnmpSharpNet.Tests.AuthenticationTests;
+namespace SnmpSharpNet.Benchmarks.Security;
 
 [MemoryDiagnoser]
+[SimpleJob(RuntimeMoniker.Net90)]
+[SimpleJob(RuntimeMoniker.Net10_0)]
+[SimpleJob(RuntimeMoniker.NativeAot90)]
+[SimpleJob(RuntimeMoniker.NativeAot10_0)]
 public class AuthenticationBenchmarks
 {
-    private AuthenticationMD5? _md5;
-    private AuthenticationSHA1? _sha1;
-    private AuthenticationSHA256? _sha256;
-    private AuthenticationSHA384? _sha384;
-    private AuthenticationSHA512? _sha512;
     private byte[]? _password;
     private byte[]? _engineId;
-    private AuthenticationSHA224? _sha224;
 
-    [Params(111)] public int passwordSize { get; set; }
+    [Params(8, 13, 101, 8000)] public int PasswordSize { get; set; }
 
     [GlobalSetup]
     public void PasswordToKeyIsConsistent()
     {
-        _md5 = AuthenticationMD5.Instance;
-        _sha1 = AuthenticationSHA1.Instance;
-        _sha256 = AuthenticationSHA256.Instance;
-        _sha224 = AuthenticationSHA224.Instance;
-        _sha384 = AuthenticationSHA384.Instance;
-        _sha512 = AuthenticationSHA512.Instance;
-
-        _password = new byte[passwordSize];
+        _password = new byte[PasswordSize];
         Random.Shared.NextBytes(_password);
         _engineId = [0x80, 0x00, 0x13, 0x70, 0x02, 0x01];
     }
 
-    // [Benchmark(Baseline = true)]
-    // public byte[] MD5() => _md5!.PasswordToKey(_password, _engineId);
-    //
-    // [Benchmark]
-    // public byte[] SHA1() => _sha1.PasswordToKey(_password, _engineId);
+    [Benchmark(Baseline = true)]
+    public byte[] Md5() => AuthenticationMD5.Instance.PasswordToKey(_password, _engineId);
 
     [Benchmark]
-    public byte[] SHA224() => _sha224!.PasswordToKey(_password!, _engineId!);
-    //
-    // [Benchmark]
-    // public byte[] SHA256() => _sha256.PasswordToKey(_password, _engineId);
-    //
-    // [Benchmark]
-    // public byte[] SHA384() => _sha384.PasswordToKey(_password, _engineId);
-    //
-    // [Benchmark]
-    // public byte[] SHA512() => _sha512.PasswordToKey(_password, _engineId);
+    public byte[] Sha1() => AuthenticationSHA1.Instance.PasswordToKey(_password, _engineId);
+
+    [Benchmark]
+    public byte[] Sha224() => AuthenticationSHA224.Instance.PasswordToKey(_password!, _engineId!);
+
+    [Benchmark]
+    public byte[] Sha256() => AuthenticationSHA256.Instance.PasswordToKey(_password, _engineId);
+
+    [Benchmark]
+    public byte[] Sha384() => AuthenticationSHA384.Instance.PasswordToKey(_password, _engineId);
+
+    [Benchmark]
+    public byte[] Sha512() => AuthenticationSHA512.Instance.PasswordToKey(_password, _engineId);
 }

@@ -1,4 +1,4 @@
-﻿namespace SnmpSharpNet.Tests;
+﻿namespace SnmpSharpNet.Tests.Security;
 
 public class MsgFlagsTests
 {

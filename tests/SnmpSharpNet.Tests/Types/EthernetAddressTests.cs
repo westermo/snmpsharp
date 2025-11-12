@@ -1,4 +1,4 @@
-﻿namespace SnmpSharpNet.Tests;
+﻿namespace SnmpSharpNet.Tests.Types;
 
 public class EthernetAddressTests
 {

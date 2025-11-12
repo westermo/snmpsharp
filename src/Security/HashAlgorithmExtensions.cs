@@ -6,53 +6,56 @@ namespace SnmpSharpNet;
 
 public static class HashAlgorithmExtensions
 {
-    public static T? WithHashed<T>(this HashAlgorithm hashAlgorithm, ReadOnlySpan<byte> toCompute,
-        Func<Span<byte>, int, T> postHashFunction)
+    extension(HashAlgorithm hashAlgorithm)
     {
-        Span<byte> span = stackalloc byte[hashAlgorithm.HashSize / 8];
-        return hashAlgorithm.TryComputeHash(toCompute, span, out var written)
-            ? postHashFunction(span, written)
-            : default;
-    }
-
-    public static void WithHashed(this HashAlgorithm hashAlgorithm, ReadOnlySpan<byte> toCompute,
-        Action<Span<byte>, int> postHashFunction)
-    {
-        Span<byte> span = stackalloc byte[hashAlgorithm.HashSize / 8];
-        if (hashAlgorithm.TryComputeHash(toCompute, span, out var written))
+        public T? WithHashed<T>(ReadOnlySpan<byte> toCompute,
+            Func<Span<byte>, int, T> postHashFunction)
         {
-            postHashFunction(span, written);
-        }
-    }
-
-    public static bool CompareHashed(this HashAlgorithm hashAlgorithm, ReadOnlySpan<byte> toCompute,
-        ReadOnlySpan<byte> expectedHash)
-    {
-        Span<byte> span = stackalloc byte[hashAlgorithm.HashSize / 8];
-        return hashAlgorithm.TryComputeHash(toCompute, span, out _)
-               &&
-               span[..expectedHash.Length].SequenceEqual(expectedHash);
-    }
-
-    public static void HashMegabyte(this HashAlgorithm hashAlgorithm, ReadOnlySpan<byte> toCompute)
-    {
-        const int bufferSize = 8192;
-        var buf = ArrayPool<byte>.Shared.Rent(bufferSize);
-        /* Use while loop until we've done 1 Megabyte */
-        var num = 0;
-        var count = 0;
-        while (count < 1048576)
-        {
-            for (int index = 0; index < bufferSize /*0x40*/; ++index)
-                buf[index] = toCompute[num++ % toCompute.Length];
-
-            hashAlgorithm.TransformBlock(buf, 0, bufferSize, null, 0);
-            count += bufferSize;
+            Span<byte> span = stackalloc byte[hashAlgorithm.HashSize / 8];
+            return hashAlgorithm.TryComputeHash(toCompute, span, out var written)
+                ? postHashFunction(span, written)
+                : default;
         }
 
-        hashAlgorithm.TransformFinalBlock(buf, 0, 0);
-        Array.Clear(buf, 0, bufferSize);
-        ArrayPool<byte>.Shared.Return(buf);
+        public void WithHashed(ReadOnlySpan<byte> toCompute,
+            Action<Span<byte>, int> postHashFunction)
+        {
+            Span<byte> span = stackalloc byte[hashAlgorithm.HashSize / 8];
+            if (hashAlgorithm.TryComputeHash(toCompute, span, out var written))
+            {
+                postHashFunction(span, written);
+            }
+        }
+
+        public bool CompareHashed(ReadOnlySpan<byte> toCompute,
+            ReadOnlySpan<byte> expectedHash)
+        {
+            Span<byte> span = stackalloc byte[hashAlgorithm.HashSize / 8];
+            return hashAlgorithm.TryComputeHash(toCompute, span, out _)
+                   &&
+                   span[..expectedHash.Length].SequenceEqual(expectedHash);
+        }
+
+        public void HashMegabyte(ReadOnlySpan<byte> toCompute)
+        {
+            const int bufferSize = 8192;
+            var buf = ArrayPool<byte>.Shared.Rent(bufferSize);
+            /* Use while loop until we've done 1 Megabyte */
+            var num = 0;
+            var count = 0;
+            while (count < 1048576)
+            {
+                for (int index = 0; index < bufferSize /*0x40*/; ++index)
+                    buf[index] = toCompute[num++ % toCompute.Length];
+
+                hashAlgorithm.TransformBlock(buf, 0, bufferSize, null, 0);
+                count += bufferSize;
+            }
+
+            hashAlgorithm.TransformFinalBlock(buf, 0, 0);
+            Array.Clear(buf, 0, bufferSize);
+            ArrayPool<byte>.Shared.Return(buf);
+        }
     }
 
     public static byte[] ExtendShortKey(this IAuthenticationDigest authProtocol, ReadOnlySpan<byte> shortKey,

@@ -1,6 +1,6 @@
 ﻿using BenchmarkDotNet.Attributes;
 
-namespace SnmpSharpNet.Tests;
+namespace SnmpSharpNet.Benchmarks.Types;
 
 [MemoryDiagnoser]
 public class SnmpPacketBenchmarks

@@ -1,7 +1,6 @@
-﻿using System.Security.Cryptography;
-using System.Text;
+﻿using System.Text;
 
-namespace SnmpSharpNet.Tests;
+namespace SnmpSharpNet.Tests.Security;
 
 public class Sha224Tests
 {

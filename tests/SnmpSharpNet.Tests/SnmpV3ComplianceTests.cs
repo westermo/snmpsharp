@@ -1,9 +1,4 @@
-﻿using System;
-using System.Text;
-using SnmpSharpNet;
-using TUnit;
-
-namespace CompatabilityTests
+﻿namespace SnmpSharpNet.Tests
 {
     public class SnmpV3ComplianceTests
     {

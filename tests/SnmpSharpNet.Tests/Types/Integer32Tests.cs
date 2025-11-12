@@ -1,6 +1,4 @@
-﻿using System.Text;
-
-namespace SnmpSharpNet.Tests;
+﻿namespace SnmpSharpNet.Tests.Types;
 
 public class Integer32Tests
 {

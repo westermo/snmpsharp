@@ -1,7 +1,6 @@
-﻿using System.Text;
-using BenchmarkDotNet.Attributes;
+﻿using BenchmarkDotNet.Attributes;
 
-namespace SnmpSharpNet.Tests;
+namespace SnmpSharpNet.Benchmarks.Types;
 
 [MemoryDiagnoser]
 public class Integer32Benchmarks
