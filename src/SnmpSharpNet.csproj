@@ -3,9 +3,9 @@
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-        <AssemblyVersion>1.0.2</AssemblyVersion>
-        <FileVersion>1.0.2</FileVersion>
-        <InformationalVersion>1.0.2</InformationalVersion>
+        <AssemblyVersion>1.0.4</AssemblyVersion>
+        <FileVersion>1.0.4</FileVersion>
+        <InformationalVersion>1.0.4</InformationalVersion>
         <IsAotCompatible>true</IsAotCompatible>
         <Company>Milan Sinadinovic, Westermo Network Technologies AB</Company>
         <Copyright>Copyright © Milan Sinadinovic 2008 - 2014, Westermo Network Technologies AB 2021-2025</Copyright>
