@@ -94,7 +94,7 @@ public class MibLeaf(string name, string type) : MibItem(name)
 public class MibModule : IMibThatExports
 {
     public readonly string identifier;
-    readonly Dictionary<uint[], MibItem> items = new(OidComparer.Instance);
+    public readonly Dictionary<uint[], MibItem> items = new(OidComparer.Instance);
 
     public MibModule(ModuleDefinition module, IDictionary<string, IMibThatExports> importables)
     {
@@ -240,15 +240,11 @@ public class MibModule : IMibThatExports
         return false;
     }
 
-    public static MibModule Parse(Scanner scanner, IDictionary<string, IMibThatExports> importables)
-    {
-        return new MibModule(ModuleDefinition.Parse(scanner), importables);
-    }
-
     public static MibModule Parse(string text, IDictionary<string, IMibThatExports> importables)
     {
-        return Parse(new Scanner(text), importables);
+        return new MibModule(ModuleDefinition.Parse(text), importables);
     }
+
     public override string ToString()
     {
         var sb = new System.Text.StringBuilder();

@@ -143,9 +143,9 @@ public class ModuleDefinition(
 
     public static Parser<ModuleDefinition> EntryPoint = Module;
 
-    public static ModuleDefinition Parse(Scanner scanner)
+    public static ModuleDefinition Parse(string contents)
     {
-        var context = new ParseContext(scanner)
+        var context = new ParseContext(new Scanner(contents))
         {
             WhiteSpaceParser = SMIv2.MibWhiteSpace
         };
@@ -373,9 +373,9 @@ public class ConceptualRow(
     //      "SYNTAX" <ident>
     //      "MAX-ACCESS" not-accessible
     //      "STATUS" <ident>
-    //      ["DESCRIPTION" <string>]
-    //      ["REFERENCE" <string>]
-    //      ["INDEX" "{" ident, ... "}"]
+    //      ("DESCRIPTION" <string>)?
+    //      ("REFERENCE" <string>)?
+    //      ("INDEX" "{" ident, ... "}")?
     public static readonly Parser<ConceptualRow> InnerParser =
         SMIv2.Ident
             .AndSkip(Terms.Keyword("OBJECT-TYPE"))
@@ -388,7 +388,7 @@ public class ConceptualRow(
                 x.Item1, x.Item5, x.Item2, x.Item3, x.Item4));
 }
 
-// OBJECT-TYPE for scalar/columnar objects
+// OBJECT-TYPE for leafs
 public class LeafObject(
     TextSpan name,
     UnresolvedOid oid,
