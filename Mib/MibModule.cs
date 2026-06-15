@@ -121,7 +121,7 @@ public class MibModule : IMibThatExports
         // Second pass:
         // Resolve all types
         // 
-        var typedefsByName = module.Items
+        typedefsByName = module.Items
             .OfType<TextualConvention>()
             .ToDictionary(x => x.Name.ToString(), x => x.Syntax.ToString());
 

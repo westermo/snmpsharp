@@ -7,7 +7,7 @@ static class Extensions
     {
         public string AsOidLiteral()
         {
-            return $"new Oid([{string.Join(", ", ident.Oid)}])";
+            return $"new global::SnmpSharpNet.Oid([{string.Join(", ", ident.Oid)}])";
         }
     }
 }
