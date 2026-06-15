@@ -16,7 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <AdditionalFiles Include="../mibs/*.mib" Link="$(Filename)$(Extension)" />
+    <None Include="../mibs/*.mib" Link="$(Filename)$(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

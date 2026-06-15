@@ -17,19 +17,19 @@ public static class ArrayExtensions
     }
 }
 
-public readonly struct MibItemIdent(uint[] oid, string[] path)
+public readonly struct MibItemIdent(uint[] oid, string?[] path)
 {
     public readonly uint[] Oid = oid;
-    public readonly string[] Path = path;
+    public readonly string?[] OidNames = path;
 
-    public string Name => Path[Path.Length-1];
-    public string Key => string.Join(".", Path);
+    public string? Name => OidNames[OidNames.Length-1];
+    public string Path => string.Join(".", OidNames);
 
-    public MibItemIdent Add(uint oidSegment, string pathSegment)
+    public MibItemIdent Add(uint oidSegment, string? name = null)
     {
         return new MibItemIdent(
             Oid.Add(oidSegment),
-            Path.Add(pathSegment)
+            OidNames.Add(name)
         );
     }
 
@@ -43,5 +43,17 @@ public readonly struct MibItemIdent(uint[] oid, string[] path)
     public override int GetHashCode()
     {
         return Oid.Aggregate(0, (current, t) => current ^ (t > int.MaxValue ? int.MaxValue : (int)t));
+    }
+
+    public override string ToString()
+    {
+        var unnameds = Oid.Length - OidNames.Length;
+        string?[] names = [..Enumerable.Repeat<string?>(null, unnameds), ..OidNames];
+
+        return string.Join(".",
+            Enumerable.Zip(names, Oid, (name, oid) => {
+                return name is null ? $"{oid}" : $"{name}({oid})";
+            })
+        );
     }
 }

@@ -2,7 +2,6 @@ using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Text;
-using WeConfig.Language.SourceGenerators;
 
 namespace SnmpSharpNet.Mib.SourceGenerator.Tests;
 
@@ -80,9 +79,11 @@ public class SourceGeneratorTests
         );
         var result = GetResult(driver);
 
-        var hintNames = result.GeneratedSources.Select(s => s.HintName).ToArray();
-        await Assert.That(hintNames).Contains("SnmpAttributes.Generated.cs");
-        await Assert.That(hintNames).Contains("SnmpMibData.Generated.cs");
+        var hintNames = result.GeneratedSources
+            .ToDictionary(x => x.HintName, x => x.SourceText);
+        await Assert.That(hintNames.Keys).Contains("SnmpAttributes.Generated.cs");
+        await Assert.That(hintNames.Keys).Contains("SnmpMibData.Generated.cs");
+        Console.WriteLine(hintNames["SnmpMibData.Generated.cs"]);
     }
 
     [Test]

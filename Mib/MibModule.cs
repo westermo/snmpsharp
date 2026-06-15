@@ -151,35 +151,35 @@ public class MibModule : IMibThatExports
 
             if (!entryTypes.TryGetValue(table.EntryType, out var entryDef))
             {
-                throw new Exception($"ConceptualTable({oid.Path}): No such EntryType '{table.EntryType}'");
+                throw new Exception($"ConceptualTable({oid.OidNames}): No such EntryType '{table.EntryType}'");
             }
 
-            var rowOid = oid.Add(1, "");
+            var rowOid = oid.Add(1, null);
             if (!itemByOid.TryGetValue(rowOid, out var _row) || _row is not ConceptualRow row)
             {
-                throw new Exception($"ConceptualTable({oid.Path}): No ConceptualRow at .1");
+                throw new Exception($"ConceptualTable({oid}): No ConceptualRow at .1");
             }
 
             if (table.EntryType != row.EntryType || table.Status != row.Status)
             {
-                throw new Exception($"ConceptualTable({oid.Path}) doesn't match ConceptualRow");
+                throw new Exception($"ConceptualTable({oid}) doesn't match ConceptualRow");
             }
 
             var index = row.Index
                 .Select((name, idx) => {
                     if (Items[GetOid(name.ToString())] is not MibLeaf item)
                     {
-                        throw new Exception($"ConceptualTable({oid.Path}): INDEX '{name}' is not a LeafObject");
+                        throw new Exception($"ConceptualTable({oid}): INDEX '{name}' is not a LeafObject");
                     }
                     return item;
                 });
 
             var columns = entryDef.Fields
                 .Select((a, i) => {
-                    var colOid = rowOid.Add((uint)(i + 1), "");
+                    var colOid = rowOid.Add((uint)(i + 1), null);
                     if (!Items.TryGetValue(colOid, out var _col) || _col is not MibLeaf col)
                     {
-                        throw new Exception($"ConceptualTable({oid.Path}): .1.{i + 1} is not a LeafObject");
+                        throw new Exception($"ConceptualTable({oid}): .1.{i + 1} is not a LeafObject");
                     }
                     return col;
                 });

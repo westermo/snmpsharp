@@ -1,6 +1,5 @@
 using Parlot;
 using Parlot.Fluent;
-using SnmpSharpNet.Mib;
 using SnmpSharpNet.Mib.Ast;
 
 namespace SnmpSharpNet.Mib.Tests;
@@ -11,7 +10,7 @@ public abstract class ParseTestCase(string Name)
     public static IEnumerable<ParseTestCase> AllCases()
     {
         yield return EmptyModule;
-        yield return EntryDef;
+        yield return TableEntryDef;
         yield return TextualConvention;
         yield return ObjectIdentifierAssignment;
         yield return ModuleIdentityAssignment;
@@ -27,9 +26,9 @@ public abstract class ParseTestCase(string Name)
         "WESTERMO-INTERFACE-MIB DEFINITIONS ::= BEGIN END$"
     );
 
-    public static readonly ParseTestCase EntryDef = new ParseTestCase<EntryDef>(
-        nameof(EntryDef),
-        SnmpSharpNet.Mib.Ast.EntryDef.Parser,
+    public static readonly ParseTestCase TableEntryDef = new ParseTestCase<EntryDef>(
+        nameof(TableEntryDef),
+        EntryDef.Parser,
         """
         IfRefEntry ::= SEQUENCE {
             ifRefIndex      IfaceRefIndex,

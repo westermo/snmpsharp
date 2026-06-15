@@ -1,9 +1,0 @@
-using System;
-
-namespace SnmpSharpNet.Mib.Attributes;
-
-[AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
-public sealed class MibModulesAttributes(params string[] modules) : Attribute
-{
-    readonly string[] Modules = modules;
-}

@@ -1,17 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
-using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Security.Cryptography;
-using System.Text;
 using System.Threading;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
-using SnmpSharpNet.Mib;
 
-namespace WeConfig.Language.SourceGenerators;
+namespace SnmpSharpNet.Mib.SourceGenerator;
 
 [Generator]
 public sealed class SnmpGenerator : IIncrementalGenerator
@@ -210,20 +206,20 @@ public sealed class SnmpGenerator : IIncrementalGenerator
             $"{{",
             $"partial class {name}",
             $"{{",
-            ..module.Items.SelectMany(x => TemplateOidField(module.Identifier, x.Key.Name, x.Key.Oid)),
+            ..module.Items.SelectMany(x => TemplateOidField(module.Identifier, x.Value)),
             $"}}",
             $"}}"
         ]);
     }
 
-    static private string[] TemplateOidField(string modName, string fieldName, uint[] oid)
+    static private string[] TemplateOidField(string modName, MibItem item)
     {
         return [
             $"/// <summary>",
             $"/// From SNMP Mib",
-            $"/// \\<{modName}\\>.{fieldName} = {string.Join(".", oid)}",
+            $"/// {item.Identifier}",
             $"/// </summary>",
-            $"public static readonly Oid {fieldName} = new Oid([{string.Join(", ", oid)}]);"
+            $"public static readonly Oid {item.Identifier.Name} = ${item.Identifier.AsOidLiteral()};"
         ];
     }
 }
