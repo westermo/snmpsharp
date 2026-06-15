@@ -184,9 +184,9 @@ public sealed class SnmpGenerator : IIncrementalGenerator
                 var module = MibModule.Parse(mibText, modules);
                 
                 // Only add if not already present (Parse may have added it via imports/includes)
-                if (!modules.ContainsKey(module.identifier))
+                if (!modules.ContainsKey(module.Identifier))
                 {
-                    modules[module.identifier] = module;
+                    modules[module.Identifier] = module;
                 }
             }
             catch (Exception ex)
@@ -210,7 +210,7 @@ public sealed class SnmpGenerator : IIncrementalGenerator
             $"{{",
             $"partial class {name}",
             $"{{",
-            ..module.items.SelectMany(x => TemplateOidField(module.identifier, x.Value.name, x.Key)),
+            ..module.Items.SelectMany(x => TemplateOidField(module.Identifier, x.Key.Name, x.Key.Oid)),
             $"}}",
             $"}}"
         ]);

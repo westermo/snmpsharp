@@ -1,13 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Security.Cryptography;
 using Parlot;
 using SnmpSharpNet.Mib.Ast;
 
 namespace SnmpSharpNet.Mib;
-
-using NamedOid = (string key, uint[] oid);
 
 class OidComparer : IEqualityComparer<uint[]>
 {
@@ -46,197 +43,170 @@ public static class Extensions
         }
     }
 
-    extension(NamedOid self)
+    extension(MibItemIdent self)
     {
-        public NamedOid Add(TextSpan ident, uint value)
+        public MibItemIdent Add(TextSpan ident, uint value)
         {
-            return (self.key + "." + ident, self.oid.Add(value));
+            return self.Add(value, ident.ToString());
         }
     }
 }
 
-public class MibItem(string name)
-{
-    public readonly string name = name;
-}
-
-public class MibModuleInfo(
-    string name,
-    string lastUpdated, string organization,
-    string contactInfo, string  description,
-    (string, string)[] revisions
-): MibItem(name) {
-    public readonly string lastUpdated = lastUpdated;
-    public readonly string organization = organization;
-    public readonly string contactInfo = contactInfo;
-    public readonly string  description = description;
-    public readonly (string, string)[] revisions = revisions;
-
-    public MibModuleInfo(string  name, ModuleIdentity mi) : this(
-        name,
-        mi.LastUpdated.ToString(), mi.Organization.ToString(),
-        mi.ContactInfo.ToString(), mi.Description.ToString(),
-        [..mi.Revisions.Select((date, desc) => (date.ToString(), desc.ToString()))]
-    ) {}
-}
-
-public class MibTable(string name, MibLeaf[] index, MibLeaf[] columns) : MibItem(name)
-{
-    public readonly MibLeaf[] index = index;
-    public readonly MibLeaf[] columns = columns;
-}
-
-public class MibLeaf(string name, string type) : MibItem(name)
-{
-    public readonly string type = type;
-}
-
 public class MibModule : IMibThatExports
 {
-    public readonly string identifier;
-    public readonly Dictionary<uint[], MibItem> items = new(OidComparer.Instance);
+    public readonly string Identifier;
+    public readonly Dictionary<MibItemIdent, MibItem> Items = [];
 
     public MibModule(ModuleDefinition module, IDictionary<string, IMibThatExports> importables)
     {
-        identifier = module.Identifier.ToString();
+        Identifier = module.Identifier.ToString();
 
-        var oidCache = new Dictionary<TextSpan, NamedOid>();
+        var importedOids = new Dictionary<string, MibItemIdent>();
 
         // Add imported names to oidCache
         foreach (var (symbols, fromModule) in module.Imports)
         {
-            var imported = importables[fromModule.ToString()];
+            var importedModule = importables[fromModule.ToString()];
             foreach (var symbol in symbols)
             {
-                if (imported.TryImport(symbol.ToString(), out var oid, out _) && oid != null)
+                if (importedModule.TryImport(symbol.ToString(), out var oid, out _) && oid != null)
                 {
-                    oidCache.Add(symbol, ($"<{fromModule}>.{symbol}", oid));
+                    importedOids.Add(
+                        symbol.ToString(),
+                        new MibItemIdent(oid, [$"<{fromModule}>", symbol.ToString()])
+                    );
                 }
             }
         }
 
-        // Add all typedefs        
-        var typedefs = module.Items
+        //
+        // First pass:
+        // Resolve all oids
+        //
+        var itemByOid = new Dictionary<MibItemIdent, OidAssigner>();
+
+        var assignersByName = module.Items
+            .OfType<OidAssigner>()
+            .ToDictionary(x => x.Name.ToString(), x => x);
+
+        var currentlyResolving = new HashSet<string>();
+        MibItemIdent GetOid(string name)
+        {
+            if (oidByName.TryGetValue(name, out var cached)) { return cached; }
+            if (importedOids.TryGetValue(name, out cached)) { return cached; }
+
+            if (!currentlyResolving.Add(name))
+            {
+                throw new Exception($"Identifier '{name}' is recursive");
+            }
+
+            if (!assignersByName.TryGetValue(name, out var item))
+            {
+                throw new Exception($"Identifier '{name}' is missing");
+            }
+
+            var parent = GetOid(item.Oid.parent.ToString());
+            var resolved = parent.Add(item.Name, (uint)item.Oid.oid);
+            oidByName[name] = resolved;
+            itemByOid[resolved] = item;
+            return resolved;
+        }
+
+        foreach (var item in assignersByName.Keys)
+        {
+            GetOid(item);
+        }
+
+        //
+        // Second pass:
+        // Resolve all types
+        // 
+        var typedefsByName = module.Items
             .OfType<TextualConvention>()
-            .ToDictionary(x => x.Name, x => x.Syntax);
-        typedefsByName = typedefs.ToDictionary(x => x.ToString(), x => x.ToString());
-        
-        // Resolve all oids 
-        var itemsToAdd = module.Items.OfType<OidAssigner>().ToList();
-        while (itemsToAdd.Count > 0)
-        {
-            var addedSomething = false;
-            for (var i = 0; i < itemsToAdd.Count; i++)
-            {
-                var item = itemsToAdd[i];
-                if (!oidCache.TryGetValue(item.Oid.parent, out var parentOid)) { continue; }
-                oidCache.Add(item.Name, parentOid.Add(item.Name, (uint)item.Oid.oid));
-                addedSomething = true;
+            .ToDictionary(x => x.Name.ToString(), x => x.Syntax.ToString());
 
-                itemsToAdd.RemoveAt(i);
-                i--;
-            }
-
-            if (!addedSomething)
-            {
-                throw new Exception("We never added something :(");
-            }
-        }
-
-        // Add table entry defintions
-        var fieldCache = module.Items
+        var entryTypes = module.Items
             .OfType<EntryDef>()
-            .ToDictionary(x => x.Name, x => x.Fields);
+            .ToDictionary(x => x.Name, x => x);
 
-
-        // Add items
-        foreach (var item in module.Items.OfType<ObjectIdentifier>())
+        //
+        // Second pass:
+        // Resolve all items
+        //
+        foreach (var mi in module.Items.OfType<ModuleIdentity>())
         {
-            oidsByName[item.Name.ToString()] = oidCache[item.Name].oid;
+            var oid = GetOid(mi.Name.ToString());
+            Items.Add(oid, new MibModuleInfo(oid, mi));
         }
 
-        foreach (var item in module.Items.OfType<ModuleIdentity>())
+        foreach (var lo in module.Items.OfType<LeafObject>())
         {
-            var (key, oid) = oidCache[item.Name];
-            oidsByName[item.Name.ToString()] = oid;
-            items.Add(oid, new MibModuleInfo(key, item));
+            var oid = GetOid(lo.Name.ToString());
+            Items.Add(oid, new MibLeaf(oid, lo.Syntax.ToString()));
         }
 
-        foreach (var item in module.Items.OfType<LeafObject>())
+        foreach (var table in module.Items.OfType<ConceptualTable>())
         {
-            if (item.Status != SMIv2Status.Current) { continue; }
+            var oid = GetOid(table.Name.ToString());
 
-            var (key, oid) = oidCache[item.Name];
-            oidsByName[item.Name.ToString()] = oid;
-            items.Add(oid, new MibLeaf(key, item.Syntax.ToString().Trim()));
-        }
-
-        // Add tables
-        var entryTypes = module.Items.OfType<EntryDef>().ToDictionary(x => x.Name, x => x.Fields);
-        var tables = module.Items.OfType<ConceptualTable>().ToDictionary(x => x.Name, x => x);
-
-        foreach (var item in module.Items.OfType<ConceptualRow>())
-        {
-            if (item.Status != SMIv2Status.Current) { continue; }
-
-            var table = tables[item.Oid.parent];
-            var (rowKey, rowOid) = oidCache[item.Name];
-            var (tableKey, tableOid) = oidCache[table.Name];
-
-            if (table.EntryType != item.EntryType || table.Status != item.Status || !tableOid.Add(1).SequenceEqual(rowOid))
+            if (!entryTypes.TryGetValue(table.EntryType, out var entryDef))
             {
-                throw new Exception($"ConceptualTable({table.Name}) doesn't match ConceptualRow({table.Name})");
+                throw new Exception($"ConceptualTable({oid.Path}): No such EntryType '{table.EntryType}'");
             }
 
-            var index = item.Index
-                .Select((x, idx) => {
-                    var indexItem = items[oidCache[x].oid];
-                    if (indexItem is not MibLeaf indexLeaf)
-                    {
-                        throw new Exception("Non leaf object as index");
-                    }
+            var rowOid = oid.Add(1, "");
+            if (!itemByOid.TryGetValue(rowOid, out var _row) || _row is not ConceptualRow row)
+            {
+                throw new Exception($"ConceptualTable({oid.Path}): No ConceptualRow at .1");
+            }
 
-                    return new MibLeaf($"{rowKey}[{idx}]", indexLeaf.type);
+            if (table.EntryType != row.EntryType || table.Status != row.Status)
+            {
+                throw new Exception($"ConceptualTable({oid.Path}) doesn't match ConceptualRow");
+            }
+
+            var index = row.Index
+                .Select((name, idx) => {
+                    if (Items[GetOid(name.ToString())] is not MibLeaf item)
+                    {
+                        throw new Exception($"ConceptualTable({oid.Path}): INDEX '{name}' is not a LeafObject");
+                    }
+                    return item;
                 });
 
-            var columns = entryTypes[item.EntryType]
-                .Select((row, idx) => {
-                    var colOid = rowOid.Add((uint)(idx + 1));
-                    var colItem = items[colOid];
-
-                    if (colItem is not MibLeaf colLeaf)
+            var columns = entryDef.Fields
+                .Select((a, i) => {
+                    var colOid = rowOid.Add((uint)(i + 1), "");
+                    if (!Items.TryGetValue(colOid, out var _col) || _col is not MibLeaf col)
                     {
-                        throw new Exception($"Non-leaf column at index {idx + 1}");
+                        throw new Exception($"ConceptualTable({oid.Path}): .1.{i + 1} is not a LeafObject");
                     }
-                    return colLeaf;
+                    return col;
                 });
 
-            oidsByName[table.Name.ToString()] = tableOid;
-            items[tableOid] = new MibTable(tableKey, [..index], [..columns]);
+            Items.Add(oid, new MibTable(oid, [..index], [..columns]));
         }
-
     }
 
     //
     // IMibThatExports
     //
-    private readonly Dictionary<string, uint[]> oidsByName = [];
+    private readonly Dictionary<string, MibItemIdent> oidByName = [];
     private readonly Dictionary<string, string> typedefsByName = [];
 
-    public bool TryImport(string ident, out uint[]? oid, out string? syntax)
+    public bool TryImport(string name, out uint[]? oid, out string? syntax)
     {
-        if (oidsByName.TryGetValue(ident, out oid))
-        {
-            syntax = null;
-            return true;
-        }
-        if (typedefsByName.TryGetValue(ident, out syntax))
-        {
-            oid = null;
-            return true;
-        }
         oid = null;
         syntax = null;
+        if (oidByName.TryGetValue(name, out var ident))
+        {
+            oid = ident.Oid;
+            return true;
+        }
+        if (typedefsByName.TryGetValue(name, out syntax))
+        {
+            return true;
+        }
         return false;
     }
 
@@ -248,33 +218,33 @@ public class MibModule : IMibThatExports
     public override string ToString()
     {
         var sb = new System.Text.StringBuilder();
-        foreach (var kv in items)
+        foreach (var kv in Items)
         {
             var item = kv.Value;
-            sb.AppendLine($"\n{item.name}:");
-            sb.Append($"{string.Join(".", kv.Key)}");
+            sb.AppendLine($"\n{item.Identifier}:");
+            sb.Append($"{string.Join(".", kv.Key.Oid)}");
             switch (item)
             {
                 case MibModuleInfo mi:
                     sb.AppendLine($" ::= ModuleInfo {{");
-                    sb.AppendLine($"  LastUpdated: {mi.lastUpdated}");
-                    sb.AppendLine($"  Organization: {mi.organization}");
-                    sb.AppendLine($"  ContactInfo: {mi.contactInfo}");
-                    sb.AppendLine($"  Description: {mi.description}");
-                    foreach (var (date, desc) in mi.revisions)
+                    sb.AppendLine($"  LastUpdated: {mi.LastUpdated}");
+                    sb.AppendLine($"  Organization: {mi.Organization}");
+                    sb.AppendLine($"  ContactInfo: {mi.ContactInfo}");
+                    sb.AppendLine($"  Description: {mi.Description}");
+                    foreach (var (date, desc) in mi.Revisions)
                     {
                         sb.AppendLine($"  Revision: {date} - {desc}");
                     }
                     sb.AppendLine($"}}");
                     break;
                 case MibLeaf leaf:
-                    sb.AppendLine($" ::= {leaf.type}");
+                    sb.AppendLine($" ::= {leaf.Type}");
                     break;
                 case MibTable table:
                     sb.AppendLine($"[");
-                    sb.AppendLine($"  {string.Join(",\n  ", table.index.Select(x => x.type))}");
+                    sb.AppendLine($"  {string.Join(",\n  ", table.Index.Select(x => x.Type))}");
                     sb.AppendLine($"] {{");
-                    sb.AppendLine($"  {string.Join(",\n  ", table.columns.Select(x => $"{x.name}: {x.type}"))}");
+                    sb.AppendLine($"  {string.Join(",\n  ", table.Columns.Select(x => $"{x.Identifier}: {x.Type}"))}");
                     sb.AppendLine($"}}");
                     break;
             }

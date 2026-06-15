@@ -1,9 +1,9 @@
-﻿using Parlot;
+using Parlot;
 using Parlot.Fluent;
 using SnmpSharpNet.Mib;
 using SnmpSharpNet.Mib.Ast;
 
-namespace MibTests;
+namespace SnmpSharpNet.Mib.Tests;
 
 public abstract class ParseTestCase(string Name)
 {
@@ -21,7 +21,6 @@ public abstract class ParseTestCase(string Name)
         yield return IgnoredObjectGroup;
         yield return IgnoredModuleCompliance;
     }
-
     public static readonly ParseTestCase EmptyModule = new ParseTestCase<ModuleDefinition>(
         nameof(EmptyModule),
         ModuleDefinition.EntryPoint,
@@ -195,7 +194,7 @@ class ParseTestCase<T>(string Name, Parser<T> Parser, string ToParse) : ParseTes
     }
 }
 
-public class MibTests
+public class ParsingTests
 {
     [Test]
     [Arguments("WESTERMO-OID-MIB.mib")]
@@ -207,9 +206,9 @@ public class MibTests
         foreach (var mib in mibs)
         {
             var module = MibModule.Parse(File.ReadAllText(mib), importCache);
-            importCache.Add(module.identifier, module);
+            importCache.Add(module.Identifier, module);
             Console.WriteLine("\n-----------------");
-            Console.WriteLine($"-- {module.identifier}");
+            Console.WriteLine($"-- {module.Identifier}");
             Console.WriteLine("-----------------");
             Console.WriteLine(module);
         }

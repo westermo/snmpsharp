@@ -1,11 +1,10 @@
 using System.Collections.Immutable;
-using System.Reflection;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Text;
 using WeConfig.Language.SourceGenerators;
 
-namespace MibTests;
+namespace SnmpSharpNet.Mib.SourceGenerator.Tests;
 
 public class SourceGeneratorTests
 {
@@ -15,7 +14,7 @@ public class SourceGeneratorTests
         // driver's probing path. Resolve it from the test output directory.
         AppDomain.CurrentDomain.AssemblyResolve += (_, args) =>
         {
-            var name = new AssemblyName(args.Name).Name;
+            var name = new System.Reflection.AssemblyName(args.Name).Name;
             var path = Path.Combine(AppContext.BaseDirectory, name + ".dll");
             return File.Exists(path) ? System.Reflection.Assembly.LoadFrom(path) : null;
         };
@@ -24,7 +23,7 @@ public class SourceGeneratorTests
     private static GeneratorDriver CreateDriver(string source, params (string name, string content)[] additionalFiles)
     {
         var parseOptions = CSharpParseOptions.Default;
-        
+
         // The attributes must be available in the compilation before the generator runs
 
         var syntaxTree = CSharpSyntaxTree.ParseText(source, parseOptions);

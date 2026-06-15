@@ -1,0 +1,572 @@
+SOCE-SNMP-ROOT-MIB DEFINITIONS ::= BEGIN
+
+IMPORTS
+	MODULE-IDENTITY, OBJECT-IDENTITY,
+	OBJECT-TYPE, NOTIFICATION-TYPE,
+	Integer32, Unsigned32	FROM SNMPv2-SMI
+	DisplayString			FROM SNMPv2-TC
+	enterprises				FROM SNMPv2-SMI;
+
+soce OBJECT IDENTIFIER ::=  { enterprises 47561 }
+
+devInfo OBJECT IDENTIFIER ::=  { soce 1 }
+devStatus OBJECT IDENTIFIER ::=  { soce 2 }
+portStatus OBJECT IDENTIFIER ::=  { soce 3 }
+portStatistics OBJECT IDENTIFIER ::=  { soce 4 }
+ptpSync OBJECT IDENTIFIER ::=  { soce 5 }
+ntpSync OBJECT IDENTIFIER ::=  { soce 6 }
+hsrPrp OBJECT IDENTIFIER ::=  { soce 7 }
+
+serialNo	OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Device serial number."
+	::={ devInfo 1 }
+
+productModel	OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Product model."
+	::={ devInfo 2 }
+
+productVersion	OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Product version."
+	::={ devInfo 3 }
+
+devName	OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-write
+	STATUS current
+	DESCRIPTION
+		"Device name assigned by the user."
+	::={ devInfo 4 }
+
+devLocation	OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-write
+	STATUS current
+	DESCRIPTION
+		"Device location assigned by the user."
+	::={ devInfo 5 }
+
+cpuTemperature	OBJECT-TYPE
+	SYNTAX Integer32
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Current device temperature (celsius degrees)."
+	::={ devStatus 1 }
+
+cpuLoad	OBJECT-TYPE
+	SYNTAX Integer32
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Current CPU load (percentage)."
+	::={ devStatus 2 }
+
+memoryUsage	OBJECT-TYPE
+	SYNTAX Integer32
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Current used memory (percentage)."
+	::={ devStatus 3 }
+
+upTime	OBJECT-TYPE
+	SYNTAX Unsigned32
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Time in seconds since last reboot."
+	::={ devStatus 4 }
+
+sfpVarTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF SfpVarEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION "Information associated to SFPs."
+	::={ devStatus 5 }
+	
+sfpVarEntry OBJECT-TYPE
+	SYNTAX SfpVarEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION "Information associated to SFPs."
+	INDEX { sfpId }
+	::= { sfpVarTable 1 }
+
+SfpVarEntry ::= SEQUENCE {
+	sfpId Integer32,
+	sfpName DisplayString,
+	sfpPartNumber DisplayString,
+	sfpVendorSn DisplayString,
+	sfpVendorRev DisplayString,
+	sfpConnType DisplayString,
+	sfpWavelength Integer32,
+	sfpBitrate Integer32,
+	sfpVoltage Integer32,
+	sfpTxPower Integer32,
+	sfpRxPower Integer32
+}
+
+sfpId OBJECT-TYPE
+	SYNTAX Integer32
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION "SFP port Id."
+	::= { sfpVarEntry 1 }
+
+sfpName OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "SFP port name."
+	::= { sfpVarEntry 2 }
+
+sfpPartNumber OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "SFP part number."
+	::= { sfpVarEntry 3 }
+
+sfpVendorSn OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "SFP vendor serial number."
+	::= { sfpVarEntry 4 }
+
+sfpVendorRev OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "SFP vendor revision."
+	::= { sfpVarEntry 5 }
+
+sfpConnType OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "SFP connector type."
+	::= { sfpVarEntry 6 }
+
+sfpWavelength OBJECT-TYPE
+	SYNTAX Integer32
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "SFP wavelength (Fiber Optic)."
+	::= { sfpVarEntry 7 }
+
+sfpBitrate OBJECT-TYPE
+	SYNTAX Integer32
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "SFP bitrate."
+	::= { sfpVarEntry 8 }
+
+sfpVoltage OBJECT-TYPE
+	SYNTAX Integer32
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "FO measured voltage (mV)."
+	::= { sfpVarEntry 9 }
+  
+sfpTxPower OBJECT-TYPE
+	SYNTAX Integer32
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "FO measured transmitted power (dBm * 1000)."
+	::= { sfpVarEntry 10 }
+  
+sfpRxPower OBJECT-TYPE
+	SYNTAX Integer32
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "FO measured received power (dBm * 1000)."
+	::= { sfpVarEntry 11 }
+
+portStatusTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF PortStatusEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION "Switching ports link status."
+	::={ portStatus 1 }
+	
+portStatusEntry OBJECT-TYPE
+	SYNTAX PortStatusEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION "Switching ports link status."
+	INDEX { portLinkId }
+	::= { portStatusTable 1 }
+
+PortStatusEntry ::= SEQUENCE {
+	portLinkId Integer32,
+	portLinkName DisplayString,
+	portLinkStatus Integer32,
+	portLinkSpeed Integer32
+}
+
+portLinkId OBJECT-TYPE
+	SYNTAX Integer32
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION "Switch port Id."
+	::= { portStatusEntry 1 }
+
+portLinkName OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "Switch port name."
+	::= { portStatusEntry 2 }
+
+portLinkStatus OBJECT-TYPE
+	SYNTAX Integer32
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "Switch port link status (up/down)."
+	::= { portStatusEntry 3 }
+  
+portLinkSpeed OBJECT-TYPE
+	SYNTAX Integer32
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "Switch port link speed (10/100/1000)."
+	::= { portStatusEntry 4 }
+
+portStatisticsTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF PortStatisticsEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION "Switching ports traffic statistics."
+	::={ portStatistics 1 }
+
+portStatisticsEntry OBJECT-TYPE
+	SYNTAX PortStatisticsEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION "Switching ports traffic statistics."
+	INDEX { portStatsId }
+	::= { portStatisticsTable 1 }
+
+PortStatisticsEntry ::= SEQUENCE {
+	portStatsId Integer32,
+	portStatsName DisplayString,
+	portStatsReceivedBytes Unsigned32,
+	portStatsTransmittedBytes Unsigned32,
+	portStatsCrcErrorFrames Unsigned32
+}
+
+portStatsId OBJECT-TYPE
+	SYNTAX Integer32
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION "Switch port Id."
+	::= { portStatisticsEntry 1 }
+
+portStatsName OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "Switch port name."
+	::= { portStatisticsEntry 2 }
+
+portStatsReceivedBytes OBJECT-TYPE
+	SYNTAX Unsigned32
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "Switch port received bytes counter."
+	::= { portStatisticsEntry 3 }
+
+portStatsTransmittedBytes OBJECT-TYPE
+	SYNTAX Unsigned32
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "Switch port transmitted bytes counter."
+	::= { portStatisticsEntry 4 }
+
+portStatsCrcErrorFrames OBJECT-TYPE
+	SYNTAX Unsigned32
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "Switch port received frames with CRC errors counter."
+	::= { portStatisticsEntry 5 }
+
+ptpSyncEnabled	OBJECT-TYPE
+	SYNTAX Integer32
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"PTP synchronization enabled."
+	::={ ptpSync 1 }
+
+ptpSyncRunning	OBJECT-TYPE
+	SYNTAX Integer32
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"PTP synchronization running."
+	::={ ptpSync 2 }
+
+ptpSlaveOnly	OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"PTP slave only mode."
+	::={ ptpSync 3 }
+
+ptpMasterOffset	OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"PTP master offset (ns)."
+	::={ ptpSync 4 }
+
+ptpGmPresent	OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Indicates if an external PTP Grandmaster is present."
+	::={ ptpSync 5 }
+
+ptpGmIdentity	OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"PTP Grandmaster identity."
+	::={ ptpSync 6 }
+
+ptpGmTimeBaseIndicator	OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"PTP Grandmaster time base indicator."
+	::={ ptpSync 7 }
+
+ptpGmClockClass	OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"PTP Grandmaster clock class."
+	::={ ptpSync 8 }
+
+ptpGmCurrentUtcOffset	OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"PTP Grandmaster current UTC offset."
+	::={ ptpSync 9 }
+
+ptpGmTimeTracable	OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Indicates if the time provided by PTP Grandmaster is traceable to a primary reference."
+	::={ ptpSync 10 }
+
+ptpGmTimeSource	OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"PTP Grandmaster time source."
+	::={ ptpSync 11 }
+
+ntpSyncEnabled	OBJECT-TYPE
+	SYNTAX Integer32
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"NTP synchronization enabled."
+	::={ ntpSync 1 }
+
+ntpSyncRunning	OBJECT-TYPE
+	SYNTAX Integer32
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"NTP synchronization running."
+	::={ ntpSync 2 }
+
+ntpSyncStatus	OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"NTP synchronization status."
+	::={ ntpSync 3 }
+	
+ntpPeersVarTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF NtpPeersVarEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION "Information associated to NTP peers."
+	::={ ntpSync 4 }
+	
+ntpPeersVarEntry OBJECT-TYPE
+	SYNTAX NtpPeersVarEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION "Information associated to NTP peers."
+	INDEX { ntpPeerId }
+	::= { ntpPeersVarTable 1 }
+
+NtpPeersVarEntry ::= SEQUENCE {
+	ntpPeerId Integer32,
+	ntpPeerRemote DisplayString,
+	ntpPeerRefid DisplayString,
+	ntpPeerStratum DisplayString,
+	ntpPeerType DisplayString,
+	ntpPeerLastResponse DisplayString,
+	ntpPeerPollInterval DisplayString,
+	ntpPeerReach DisplayString,
+	ntpPeerDelay DisplayString,
+	ntpPeerOffset DisplayString,
+	ntpPeerJitter DisplayString
+}
+
+ntpPeerId OBJECT-TYPE
+	SYNTAX Integer32
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION "NTP peer Id."
+	::= { ntpPeersVarEntry 1 }
+  
+ntpPeerRemote OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "NTP peer name/IP."
+	::= { ntpPeersVarEntry 2 }
+  
+ntpPeerRefid OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "Where or what the remote peer or server is itself synchronised to."
+	::= { ntpPeersVarEntry 3 }
+  
+ntpPeerStratum OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "NTP peer stratum."
+	::= { ntpPeersVarEntry 4 }
+  
+ntpPeerType OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "NTP peer type (unicast, multicast, broadcast, local reference clock)."
+	::= { ntpPeersVarEntry 5 }
+  
+ntpPeerLastResponse OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "Number of seconds passed since last response."
+	::= { ntpPeersVarEntry 6 }
+  
+ntpPeerPollInterval OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "NTP peer poll interval."
+	::= { ntpPeersVarEntry 7 }
+  
+ntpPeerReach OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "Indicates if valid packets are received from the server."
+	::= { ntpPeersVarEntry 8 }
+  
+ntpPeerDelay OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "The round-trip delay to peer is reported in millisenconds."
+	::= { ntpPeersVarEntry 9 }  
+  
+ntpPeerOffset OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "Offset is the time difference between the peers or between the server and client."
+	::= { ntpPeersVarEntry 10 } 
+  
+ntpPeerJitter OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION "NTP peer synchronization jitter."
+	::= { ntpPeersVarEntry 11 }
+
+hsrPrpPortsEnabled	OBJECT-TYPE
+	SYNTAX Integer32
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"HSR/PRP ports enabled."
+	::={ hsrPrp 1 }
+
+hsrPrpProtocol	OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Redundancy protocol used, HSR or PRP."
+	::={ hsrPrp 2 }
+
+hsrPrpWorkMode	OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"HSR or PRP working mode."
+	::={ hsrPrp 3 }
+
+hsrConfigurationMode	OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Configuration mode in case of HSR protocol."
+	::={ hsrPrp 4 }
+
+hsrPrpOwnNetId	OBJECT-TYPE
+	SYNTAX Integer32
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"HSR or PRP own network identifier."
+	::={ hsrPrp 5 }
+
+hsrPrpSupFramesTx	OBJECT-TYPE
+	SYNTAX Integer32
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"HSR/PRP supervision frames transmission enabled."
+	::={ hsrPrp 6 }
+
+END

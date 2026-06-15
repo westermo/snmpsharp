@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -11,13 +11,12 @@
   <ItemGroup>
     <PackageReference Include="TUnit" Version="1.45.29" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
-    <ProjectReference Include="../Mib/SnmpSharpNet.Mib.csproj" />
-    <ProjectReference Include="../Mib.SourceGenerator/SnmpSharpNet.Mib.SourceGenerator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
+    <ProjectReference Include="../../Mib/SnmpSharpNet.Mib.csproj" />
+    <ProjectReference Include="../../Mib.SourceGenerator/SnmpSharpNet.Mib.SourceGenerator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
   </ItemGroup>
 
   <ItemGroup>
-    <AdditionalFiles Include="*.mib" />
-    <None Update="*.mib" CopyToOutputDirectory="PreserveNewest" />
+    <AdditionalFiles Include="../mibs/*.mib" Link="$(Filename)$(Extension)" />
   </ItemGroup>
 
 </Project>
