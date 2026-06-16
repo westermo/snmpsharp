@@ -9,51 +9,18 @@ using Microsoft.CodeAnalysis.Text;
 
 namespace SnmpSharpNet.Mib.SourceGenerator;
 
-using PartialClass = (string Accessibility, string Namespace, string TypeName);
+using PartialClass = (string Accessibility, string? Namespace, string TypeName);
 
 [Generator]
 public sealed class SnmpGenerator : IIncrementalGenerator
 {
-    private static readonly DiagnosticDescriptor DiagParseError = new(
-        id: "SNMP001",
-        title: "Failed to parse SNMP MIB module",
-        messageFormat: "Parsing failed when parsing '{0}': {1}",
-        category: "Design", DiagnosticSeverity.Error,
-        isEnabledByDefault: true
-    );
-    private static readonly DiagnosticDescriptor DiagModuleFindingError = new(
-        id: "SNMP002",
-        title: "Failed to find SNMP MIB module",
-        messageFormat: "No <AdditionalFiles> file matches '**/*/{0}.mib'",
-        category: "Design", DiagnosticSeverity.Error,
-        isEnabledByDefault: true
-    );
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        context
-            .RegisterPostInitializationOutput(i =>
-            {
-                i.AddEmbeddedAttributeDefinition();
-                i.AddSource("SnmpAttributes.Generated.cs",
-                    """
-                    #pragma warning disable CS9113
-                    using System;
-
-                    namespace SnmpSharpNet.Mib.Attributes
-                    {
-                        [global::Microsoft.CodeAnalysis.EmbeddedAttribute]
-                        [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
-                        public sealed class MibModulesAttribute(params string[] modules) : Attribute {}
-
-                        [global::Microsoft.CodeAnalysis.EmbeddedAttribute]
-                        [AttributeUsage(AttributeTargets.Class)]
-                        public sealed class MibOidsAttribute(string module) : Attribute {}
-                    }
-                    #pragma warning restore CS9113
-                    """
-                );
-            });
+        context.RegisterPostInitializationOutput(i => {
+            i.AddEmbeddedAttributeDefinition();
+            i.AddSource("SnmpAttributes.Generated.cs", Templating.Attributes);
+        });
 
         var moduleNames = context.SyntaxProvider
             .ForAttributeWithMetadataName(
@@ -75,28 +42,25 @@ public sealed class SnmpGenerator : IIncrementalGenerator
             .ForAttributeWithMetadataName(
                 "SnmpSharpNet.Mib.Attributes.MibOidsAttribute",
                 (node, ct) => true,
-                (c, ct) => c.Attributes.SelectMany(x => ParseMibOidsAttribute(c.TargetSymbol, x))
+                (c, ct) => c.Attributes.Select(x => ParseMibOidsAttribute(c.TargetSymbol, x))
             )
             .SelectMany((x, ct) => x)
             .Collect();
 
         context.RegisterSourceOutput(oidCarriers.Combine(loadedModules), (ctx, x) =>
         {
-            var (loadedModules, loadError) = x.Right;
-            if (loadedModules is null)
-            {
-                ctx.ReportDiagnostic(loadError!);
-                return;
-            }
+            var unresolvedCarriers = x.Left.ReportAll(ctx).ToArray();
+            if (!x.Right.OrReport(ctx, out var loadedModules)) { return; }
 
-            if (x.Left.Length <= 0) { return; }
+            if (unresolvedCarriers.Length <= 0) { return; }
  
-            var carriers = x.Left.Select(
-                x => (x.decl, (MibModule)loadedModules[x.ModuleName])
-            );
+            var carriers = unresolvedCarriers
+                .Select(carrier => {
+                    return (carrier.decl, (MibModule)loadedModules[carrier.ModuleName]);
+                });
             
             ctx.AddSource("SnmpMibData.Generated.cs",
-                string.Join("\n", TemplateDataFile(carriers))
+                string.Join("\n", Templating.DataFile(carriers))
             );
         });
     }
@@ -126,24 +90,27 @@ public sealed class SnmpGenerator : IIncrementalGenerator
             return [];
     }
 
-    private static IEnumerable<(PartialClass decl, string ModuleName)> ParseMibOidsAttribute(
+    private static Result<(PartialClass decl, string ModuleName)> ParseMibOidsAttribute(
         ISymbol targetSymbol,
-        AttributeData attribute)
-    {
-        // TODO: Error handling
-        if (attribute.ConstructorArguments.Length == 0) { return []; }
+        AttributeData attribute
+    ) {
+        if (attribute.ConstructorArguments.Length == 0)
+        {
+            return Diagnostic.Create(Diagnostics.ParseAttributesError, Location.None, "ParseMibOidsAttribute");
+        }
 
         var arg = attribute.ConstructorArguments[0];
         var maybeModuleName = arg.Value as string;
 
-        if (maybeModuleName is not {} moduleName) { return []; }
+        if (maybeModuleName is not string moduleName)
+        {
+            return Diagnostic.Create(Diagnostics.ParseAttributesError, Location.None, "ParseMibOidsAttribute");
+        }
 
-        return [
-            (PartialClass.FromSymbol(targetSymbol), moduleName)
-        ];
+        return (PartialClass.FromSymbol(targetSymbol), moduleName);
     }
 
-    static private (IReadOnlyDictionary<string, IMibThatExports>?, Diagnostic?) LoadMibModules(
+    static private Result<IReadOnlyDictionary<string, IMibThatExports>> LoadMibModules(
         ImmutableArray<string> moduleNames,
         ImmutableArray<AdditionalText> mibs,
         CancellationToken ct
@@ -165,7 +132,7 @@ public sealed class SnmpGenerator : IIncrementalGenerator
         {
             if (!mibsByName.TryGetValue(moduleName, out var mibInfo))
             {
-                return (null, Diagnostic.Create(DiagModuleFindingError, Location.None, moduleName));
+                return Diagnostic.Create(Diagnostics.ParseError, Location.None, moduleName);
             }
             var (mibPath, mibContents) = mibInfo;
 
@@ -180,77 +147,12 @@ public sealed class SnmpGenerator : IIncrementalGenerator
                     modules[module.Identifier] = module;
                 }
             }
-            catch (Exception ex)
+            catch (Exception e)
             {
-                return (null, Diagnostic.Create(
-                    DiagParseError,
-                    Location.None,
-                    mibPath, ex.Message
-                ));
+                return Diagnostic.Create(Diagnostics.ParseAttributesError, Location.None, mibPath, e.Message);
             }
         }
 
-        return (modules, null);
-    }
-
-    static private string[] TemplateDataFile(IEnumerable<(PartialClass, MibModule)> decls)
-    {
-        return [
-            $"using System.Collections.Generic;",
-            $"using SnmpSharpNet;",
-            $"",
-            ..decls.SelectMany(x => TemplatePartialClass(x.Item1, x.Item2))
-        ];
-    }
-
-    static private string[] TemplatePartialClass(PartialClass decl, MibModule module)
-    {
-        return decl.AsLiteral([
-            ..module.Items.Values.SelectMany(TemplateOidField),
-            $"",
-            $"public readonly Oid[] AllOids = [",
-            ..module.Items.Values.Select(
-                item => $"\t{item.Ident.Name}Oid,"
-            ),
-            $"];",
-            $"",
-            ..TemplateFromValues(decl.TypeName, module.Items.Values)
-        ]);
-    }
-
-    static private string[] TemplateOidField(MibItem item)
-    {
-        return [
-            $"",
-            $"/// <summary>",
-            $"/// From SNMP Mib",
-            $"/// {item.Ident}",
-            $"/// </summary>",
-            $"public static readonly Oid {item.Ident.Name}Oid = {item.Ident.AsLiteral()};",
-            $"",
-            $"/// <summary>",
-            $"/// From SNMP Mib",
-            $"/// {item.Ident}",
-            $"/// </summary>",
-            $"public required AsnType {item.Ident.Name};"
-        ];
-    }
-
-
-    static private string[] TemplateFromValues(string type, IEnumerable<MibItem> items)
-    {
-        return [
-            $"public static {type}? FromValues(IReadOnlyDictionary<Oid, AsnType> values)",
-            $"{{",
-            ..items.Select(
-                x => $"\tif(!values.TryGetValue({x.Ident.Name}Oid, out var _{x.Ident.Name})) {{ return null; }}"
-            ),
-            $"",
-            $"\treturn new {type}()",
-            $"\t{{",
-            ..items.Select(x => $"\t\t{x.Ident.Name} = _{x.Ident.Name},"),
-            $"\t}};",
-            $"}}",
-        ];
+        return modules;
     }
 }

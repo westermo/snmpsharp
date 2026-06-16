@@ -29,13 +29,15 @@ public class MibModuleInfo(
     ) {}
 }
 
-public class MibTable(MibItemIdent ident, MibLeaf[] index, MibLeaf[] columns) : MibItem(ident)
+public class MibValuedItem(MibItemIdent ident) : MibItem(ident) {}
+
+public class MibTable(MibItemIdent ident, MibLeaf[] index, MibLeaf[] columns) : MibValuedItem(ident)
 {
     public readonly MibLeaf[] Index = index;
     public readonly MibLeaf[] Columns = columns;
 }
 
-public class MibLeaf(MibItemIdent ident, string type) : MibItem(ident)
+public class MibLeaf(MibItemIdent ident, string type) : MibValuedItem(ident)
 {
     public readonly string Type = type;
 }

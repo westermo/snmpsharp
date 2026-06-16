@@ -7,7 +7,7 @@ namespace SnmpSharpNet.Mib.SourceGenerator;
 using PartialClass = (string Accessibility, string? Namespace, string TypeName);
 
 static class Extensions
-{
+{    
     extension(MibItemIdent ident)
     {
         public string AsLiteral()
@@ -36,10 +36,10 @@ static class Extensions
                     : symbol.ContainingNamespace.ToDisplayString();
             return (accessibility, ns, symbol.Name);
         }
-        public string[] AsLiteral(IEnumerable<string> body)
+        public string[] AsLiteral(string impls, IEnumerable<string> body)
         {
             string[] decl = [
-                $"{self.Accessibility} partial class {self.TypeName}",
+                $"{self.Accessibility} partial class {self.TypeName}{impls}",
                 $"{{",
                 ..body.Select(x => $"\t{x}"),
                 $"}}",
