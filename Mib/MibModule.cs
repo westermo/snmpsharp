@@ -221,7 +221,7 @@ public class MibModule : IMibThatExports
         foreach (var kv in Items)
         {
             var item = kv.Value;
-            sb.AppendLine($"\n{item.Identifier}:");
+            sb.AppendLine($"\n{item.Ident}:");
             sb.Append($"{string.Join(".", kv.Key.Oid)}");
             switch (item)
             {
@@ -244,7 +244,7 @@ public class MibModule : IMibThatExports
                     sb.AppendLine($"[");
                     sb.AppendLine($"  {string.Join(",\n  ", table.Index.Select(x => x.Type))}");
                     sb.AppendLine($"] {{");
-                    sb.AppendLine($"  {string.Join(",\n  ", table.Columns.Select(x => $"{x.Identifier}: {x.Type}"))}");
+                    sb.AppendLine($"  {string.Join(",\n  ", table.Columns.Select(x => $"{x.Ident}: {x.Type}"))}");
                     sb.AppendLine($"}}");
                     break;
             }

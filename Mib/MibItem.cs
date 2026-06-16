@@ -6,7 +6,7 @@ namespace SnmpSharpNet.Mib;
 
 public class MibItem(MibItemIdent ident)
 {
-    public readonly MibItemIdent Identifier = ident;
+    public readonly MibItemIdent Ident = ident;
 }
 
 public class MibModuleInfo(

@@ -9,6 +9,8 @@ using Microsoft.CodeAnalysis.Text;
 
 namespace SnmpSharpNet.Mib.SourceGenerator;
 
+using PartialClass = (string Accessibility, string Namespace, string TypeName);
+
 [Generator]
 public sealed class SnmpGenerator : IIncrementalGenerator
 {
@@ -35,6 +37,7 @@ public sealed class SnmpGenerator : IIncrementalGenerator
                 i.AddEmbeddedAttributeDefinition();
                 i.AddSource("SnmpAttributes.Generated.cs",
                     """
+                    #pragma warning disable CS9113
                     using System;
 
                     namespace SnmpSharpNet.Mib.Attributes
@@ -47,6 +50,7 @@ public sealed class SnmpGenerator : IIncrementalGenerator
                         [AttributeUsage(AttributeTargets.Class)]
                         public sealed class MibOidsAttribute(string module) : Attribute {}
                     }
+                    #pragma warning restore CS9113
                     """
                 );
             });
@@ -78,7 +82,6 @@ public sealed class SnmpGenerator : IIncrementalGenerator
 
         context.RegisterSourceOutput(oidCarriers.Combine(loadedModules), (ctx, x) =>
         {
-            var carriers = x.Left;
             var (loadedModules, loadError) = x.Right;
             if (loadedModules is null)
             {
@@ -86,20 +89,15 @@ public sealed class SnmpGenerator : IIncrementalGenerator
                 return;
             }
 
-            var source = string.Join("\n",
-                carriers
-                    .Select(carrier => {
-                        try {
-                            return TemplatePartialClass(carrier.Namespace, carrier.TypeName, (MibModule)loadedModules[carrier.ModuleName]);
-                        } catch (Exception ex) {
-                            return $"// ERROR generating {carrier.TypeName}: {ex.Message}";
-                        }
-                    })
+            if (x.Left.Length <= 0) { return; }
+ 
+            var carriers = x.Left.Select(
+                x => (x.decl, (MibModule)loadedModules[x.ModuleName])
             );
-
-            if (carriers.Length > 0) {
-                ctx.AddSource("SnmpMibData.Generated.cs", source);
-            }
+            
+            ctx.AddSource("SnmpMibData.Generated.cs",
+                string.Join("\n", TemplateDataFile(carriers))
+            );
         });
     }
 
@@ -128,24 +126,21 @@ public sealed class SnmpGenerator : IIncrementalGenerator
             return [];
     }
 
-    private static IEnumerable<(string ModuleName, string Namespace, string TypeName)> ParseMibOidsAttribute(
+    private static IEnumerable<(PartialClass decl, string ModuleName)> ParseMibOidsAttribute(
         ISymbol targetSymbol,
         AttributeData attribute)
     {
-        if (attribute.ConstructorArguments.Length == 0)
-        {
-            return [];
-        }
+        // TODO: Error handling
+        if (attribute.ConstructorArguments.Length == 0) { return []; }
 
         var arg = attribute.ConstructorArguments[0];
-        var moduleName = arg.Value as string;
+        var maybeModuleName = arg.Value as string;
 
-        if (string.IsNullOrWhiteSpace(moduleName))
-        {
-            return [];
-        }
+        if (maybeModuleName is not {} moduleName) { return []; }
 
-        return [(moduleName!, targetSymbol.ContainingNamespace.ToString(), targetSymbol.Name)];
+        return [
+            (PartialClass.FromSymbol(targetSymbol), moduleName)
+        ];
     }
 
     static private (IReadOnlyDictionary<string, IMibThatExports>?, Diagnostic?) LoadMibModules(
@@ -198,28 +193,64 @@ public sealed class SnmpGenerator : IIncrementalGenerator
         return (modules, null);
     }
 
-    
-    static private string TemplatePartialClass(string ns, string name, MibModule module)
+    static private string[] TemplateDataFile(IEnumerable<(PartialClass, MibModule)> decls)
     {
-        return string.Join("\n", [
-            $"namespace {ns}",
-            $"{{",
-            $"partial class {name}",
-            $"{{",
-            ..module.Items.SelectMany(x => TemplateOidField(module.Identifier, x.Value)),
-            $"}}",
-            $"}}"
+        return [
+            $"using System.Collections.Generic;",
+            $"using SnmpSharpNet;",
+            $"",
+            ..decls.SelectMany(x => TemplatePartialClass(x.Item1, x.Item2))
+        ];
+    }
+
+    static private string[] TemplatePartialClass(PartialClass decl, MibModule module)
+    {
+        return decl.AsLiteral([
+            ..module.Items.Values.SelectMany(TemplateOidField),
+            $"",
+            $"public readonly Oid[] AllOids = [",
+            ..module.Items.Values.Select(
+                item => $"\t{item.Ident.Name}Oid,"
+            ),
+            $"];",
+            $"",
+            ..TemplateFromValues(decl.TypeName, module.Items.Values)
         ]);
     }
 
-    static private string[] TemplateOidField(string modName, MibItem item)
+    static private string[] TemplateOidField(MibItem item)
     {
         return [
+            $"",
             $"/// <summary>",
             $"/// From SNMP Mib",
-            $"/// {item.Identifier}",
+            $"/// {item.Ident}",
             $"/// </summary>",
-            $"public static readonly Oid {item.Identifier.Name} = ${item.Identifier.AsOidLiteral()};"
+            $"public static readonly Oid {item.Ident.Name}Oid = {item.Ident.AsLiteral()};",
+            $"",
+            $"/// <summary>",
+            $"/// From SNMP Mib",
+            $"/// {item.Ident}",
+            $"/// </summary>",
+            $"public required AsnType {item.Ident.Name};"
+        ];
+    }
+
+
+    static private string[] TemplateFromValues(string type, IEnumerable<MibItem> items)
+    {
+        return [
+            $"public static {type}? FromValues(IReadOnlyDictionary<Oid, AsnType> values)",
+            $"{{",
+            ..items.Select(
+                x => $"\tif(!values.TryGetValue({x.Ident.Name}Oid, out var _{x.Ident.Name})) {{ return null; }}"
+            ),
+            $"",
+            $"\treturn new {type}()",
+            $"\t{{",
+            ..items.Select(x => $"\t\t{x.Ident.Name} = _{x.Ident.Name},"),
+            $"\t}};",
+            $"}}",
         ];
     }
 }
