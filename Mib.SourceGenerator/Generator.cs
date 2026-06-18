@@ -149,7 +149,7 @@ public sealed class SnmpGenerator : IIncrementalGenerator
             }
             catch (Exception e)
             {
-                return Diagnostic.Create(Diagnostics.ParseAttributesError, Location.None, mibPath, e.Message);
+                return Diagnostic.Create(Diagnostics.ParseAttributesError, Location.None, $"{mibPath}: <{e.Message}>");
             }
         }
 

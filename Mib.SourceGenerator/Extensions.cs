@@ -16,6 +16,18 @@ static class Extensions
         }
     }
 
+    extension(MibTable table)
+    {
+        public string EntryType()
+        {
+            return $"{table.Ident.Name}Entry";
+        }
+        public string TableType()
+        {
+            return $"Dictionary<Oid, {table.EntryType()}>";
+        }
+    }
+
     extension(PartialClass self)
     {
         public static PartialClass FromSymbol(ISymbol symbol)
@@ -57,6 +69,14 @@ static class Extensions
             {
                 return decl;
             }
+        }
+    }
+
+    extension(IEnumerable<string> lines)
+    {
+        public IEnumerable<string> Indent()
+        {
+            return lines.Select(line => $"\t{line}");
         }
     }
 }

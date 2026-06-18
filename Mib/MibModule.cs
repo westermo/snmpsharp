@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using Parlot;
 using SnmpSharpNet.Mib.Ast;
@@ -183,9 +184,18 @@ public class MibModule : IMibThatExports
                     }
                     return col;
                 });
-
             Items.Add(oid, new MibTable(oid, [..index], [..columns]));
         }
+
+        foreach (var table in module.Items.OfType<ConceptualTable>())
+        {
+            var tableItem = (MibTable)Items[GetOid(table.Name.ToString())];
+            foreach (var item in tableItem.Columns)
+            {
+                Items.Remove(item.Ident);
+            }
+        }
+
     }
 
     //

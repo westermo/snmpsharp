@@ -198,6 +198,8 @@ public class ParsingTests
     [Test]
     [Arguments("WESTERMO-OID-MIB.mib")]
     [Arguments("WESTERMO-OID-MIB.mib", "WESTERMO-INTERFACE-MIB.mib")]
+    [Arguments("LLDP-MIB.mib")]
+    [Arguments("SOCE-SNMP-ROOT-MIB.mib")]
     public async Task CanParseMibs(params string[] mibs)
     {
         var importCache = new Dictionary<string, IMibThatExports>(BuiltinMib.All);

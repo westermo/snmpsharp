@@ -19,7 +19,7 @@ internal static class Diagnostics
     public static readonly DiagnosticDescriptor ParseAttributesError = new(
         id: "SNMP003",
         title: "Something is wack whn it comes to attributes",
-        messageFormat: "Very generic: {08}",
+        messageFormat: "Very generic: {0}",
         category: "Design", DiagnosticSeverity.Error,
         isEnabledByDefault: true
     );
