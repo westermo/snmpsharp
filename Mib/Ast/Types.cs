@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Parlot;
 using Parlot.Fluent;
 using static Parlot.Fluent.Parsers;
@@ -16,12 +17,44 @@ public class Refinement(IReadOnlyList<(long, Option<long>)> contraints, bool isS
         return new Refinement(contraints, true);
     }
 
+    public override bool Equals(object? obj) =>
+        obj is Refinement other
+        && IsSize == other.IsSize
+        && Contraints.SequenceEqual(other.Contraints);
+
+    public override int GetHashCode() =>
+        IsSize.GetHashCode() ^ Contraints.Count;
+
     public static Refinement AllValues = new([]);
     public static Refinement AllSizes = new([], true);
 }
 
-public class Type
+public enum TypeKind
 {
+    Integer32Enum,
+    Integer32,
+    Unsigned32,
+    OctetString,
+    ObjectIdentifier,
+    Bits,
+    Counter32,
+    Counter64,
+    Gauge32,
+    TimeTicks,
+    TextualConvention
+}
+
+public class Type(
+    TypeKind kind,
+    Refinement? refinement = null,
+    IReadOnlyList<(TextSpan, long)>? values = null,
+    TextSpan? name = null
+) {
+    public TypeKind Kind { get; } = kind;
+    public Refinement? Refinement { get; } = refinement;
+    public IReadOnlyList<(TextSpan, long)>? Values { get; } = values;
+    public TextSpan? Name { get; } = name;
+
     // Based on https://www.rfc-editor.org/rfc/rfc2578.html#section-11.1
     // TypeRefinementValue = "(" Range ( "|" Range )* ")"
     // Range = <number> | <number> ".." <number>
@@ -55,6 +88,70 @@ public class Type
             )
             .AndSkip(Terms.Char('}'));
 
+    // TypeInteger32Enum = "INTEGER" TypeRefinementEnum
+    static readonly Parser<Type> TypeInteger32Enum =
+        Terms.Keyword("INTEGER")
+            .SkipAnd(TypeRefinementEnum)
+            .Then(x => new Type(TypeKind.Integer32Enum, values: x));
+
+    // TypeInteger32 = "Integer32" | "INTEGER" TypeRefinementValue?
+    static readonly Parser<Type> TypeInteger32 =
+        Terms.Keyword("INTEGER").Or(Terms.Keyword("Integer32"))
+            .SkipAnd(TypeRefinementValue.Optional())
+            .Then(x => new Type(TypeKind.Integer32, refinement: x.OrSome(Refinement.AllValues)));
+
+    // TypeUnsigned32 = "Unsigned32" TypeRefinementValue?
+    static readonly Parser<Type> TypeUnsigned32 =
+        Terms.Keyword("Unsigned32")
+            .SkipAnd(TypeRefinementValue.Optional())
+            .Then(x => new Type(TypeKind.Unsigned32, refinement: x.OrSome(Refinement.AllValues)));
+
+    // TypeOctetString = "OCTET" "STRING" TypeRefinementSize?
+    static readonly Parser<Type> TypeOctetString =
+        Terms.Keyword("OCTET")
+            .SkipAnd(Terms.Keyword("STRING"))
+            .SkipAnd(TypeRefinementSize.Optional())
+            .Then(x => new Type(TypeKind.OctetString, refinement: x.OrSome(Refinement.AllSizes)));
+
+    // TypeObjectIdentifier = "OBJECT" "IDENTIFIER"
+    static readonly Parser<Type> TypeObjectIdentifier =
+        Terms.Keyword("OBJECT")
+            .AndSkip(Terms.Keyword("IDENTIFIER"))
+            .Then(_ => new Type(TypeKind.ObjectIdentifier));
+
+    // TypeBits = "BITS" TypeRefinementEnum
+    static readonly Parser<Type> TypeBits =
+        Terms.Keyword("BITS")
+            .SkipAnd(TypeRefinementEnum)
+            .Then(x => new Type(TypeKind.Bits, values: x));
+
+    // TypeCounter32 = "Counter32"
+    static readonly Parser<Type> TypeCounter32 =
+        Terms.Keyword("Counter32")
+            .Then(_ => new Type(TypeKind.Counter32));
+
+    // TypeCounter64 = "Counter64"
+    static readonly Parser<Type> TypeCounter64 =
+        Terms.Keyword("Counter64")
+            .Then(_ => new Type(TypeKind.Counter64));
+
+    // TypeGauge32 = "Gauge32" TypeRefinementValue?
+    static readonly Parser<Type> TypeGauge32 =
+        Terms.Keyword("Gauge32")
+            .SkipAnd(TypeRefinementValue.Optional())
+            .Then(x => new Type(TypeKind.Gauge32, refinement: x.OrSome(Refinement.AllValues)));
+
+    // TypeTimeTicks = "TimeTicks"
+    static readonly Parser<Type> TypeTimeTicks =
+        Terms.Keyword("TimeTicks")
+            .Then(_ => new Type(TypeKind.TimeTicks));
+
+    // TypeTextualConvention = IDENT TypeRefinementValue?
+    static readonly Parser<Type> TypeTextualConvention =
+        SMIv2.Ident
+            .And(TypeRefinementValue.Or(TypeRefinementSize).Optional())
+            .Then(x => new Type(TypeKind.TextualConvention, refinement: x.Item2.OrSome(null), name: x.Item1));
+
     // Type = Integer32Enum // Uses same "INTEGER" keyword as Integer32
     //      | Integer32 | Unsigned32
     //      | OCTET STRING
@@ -63,139 +160,52 @@ public class Type
     //      | Counter32 | Counter64
     //      | Gauge32
     //      | TimeTicks
+    //      | TextualConvention
     public static readonly Parser<Type> Parser =
         OneOf(
-            Integer32Enum.TypeEnum.Then(x => (Type)x),
-            Integer32.TypeInteger32.Then(x => (Type)x),
-            Unsigned32.TypeUnsigned32.Then(x => (Type)x),
-            OctetString.TypeOctetString.Then(x => (Type)x),
-            ObjectIdentifierType.TypeObjectIdentifier.Then(x => (Type)x),
-            Bits.TypeBits.Then(x => (Type)x),
-            Counter32.TypeCounter32.Then(x => (Type)x),
-            Counter64.TypeCounter64.Then(x => (Type)x),
-            Gauge32.TypeGauge32.Then(x => (Type)x),
-            TimeTicks.TypeTimeTicks.Then(x => (Type)x),
-            TextualConventionType.TypeTextualConvention.Then(x => x)
+            TypeInteger32Enum,
+            TypeInteger32,
+            TypeUnsigned32,
+            TypeOctetString,
+            TypeObjectIdentifier,
+            TypeBits,
+            TypeCounter32,
+            TypeCounter64,
+            TypeGauge32,
+            TypeTimeTicks,
+            TypeTextualConvention
         );
-}
 
-// §7.1.1 — enumeration first to resolve INTEGER ambiguity
-public class Integer32Enum(IReadOnlyList<(TextSpan, long)> values) : Type
-{
-    public IReadOnlyList<(TextSpan, long)> values = values;
+    public override string ToString() =>
+        Kind switch
+        {
+            TypeKind.Integer32Enum => $"INTEGER {{{string.Join(", ", Values?.Cast<(TextSpan, long)>().Select(v => $"{v.Item1}({v.Item2})") ?? [])}}}",
+            TypeKind.Integer32 => Refinement?.Contraints.Count > 0 ? $"INTEGER {Refinement}" : "INTEGER",
+            TypeKind.Unsigned32 => Refinement?.Contraints.Count > 0 ? $"Unsigned32 {Refinement}" : "Unsigned32",
+            TypeKind.OctetString => Refinement?.IsSize == true ? $"OCTET STRING {Refinement}" : "OCTET STRING",
+            TypeKind.ObjectIdentifier => "OBJECT IDENTIFIER",
+            TypeKind.Bits => $"BITS {{{string.Join(", ", Values?.Cast<(TextSpan, long)>().Select(v => $"{v.Item1}({v.Item2})") ?? [])}}}",
+            TypeKind.Counter32 => "Counter32",
+            TypeKind.Counter64 => "Counter64",
+            TypeKind.Gauge32 => Refinement?.Contraints.Count > 0 ? $"Gauge32 {Refinement}" : "Gauge32",
+            TypeKind.TimeTicks => "TimeTicks",
+            TypeKind.TextualConvention => Name?.ToString() ?? "?",
+            _ => "Unknown"
+        };
 
-    // TypeEnum = "INTEGER" TypeRefinementEnum
-    public static readonly Parser<Integer32Enum> TypeEnum =
-        Terms.Keyword("INTEGER")
-            .SkipAnd(TypeRefinementEnum)
-            .Then(x => new Integer32Enum(x));
-}
+    public override bool Equals(object? obj)
+    {
+        if (obj is not Type other) return false;
+        
+        return Kind == other.Kind
+            && Equals(Refinement, other.Refinement)
+            && (Values ?? []).SequenceEqual(other.Values ?? [])
+            && Name == other.Name;
+    }
 
-// §7.1.1
-public class Integer32(Refinement refinement) : Type
-{
-    public Refinement refinement = refinement;
-
-    // TypeInteger32 = "Integer32" | "INTEGER" TypeRefinementValue?
-    public static readonly Parser<Integer32> TypeInteger32 =
-        Terms.Keyword("INTEGER").Or(Terms.Keyword("Integer32"))
-            .SkipAnd(TypeRefinementValue.Optional())
-            .Then(x => new Integer32(x.OrSome(Refinement.AllValues)));
-}
-
-// §7.1.11
-public class Unsigned32(Refinement refinement) : Type
-{
-    public Refinement refinement = refinement;
-
-    // TypeUnsigned32 = "Unsigned32" TypeRefinementValue?
-    public static readonly Parser<Unsigned32> TypeUnsigned32 =
-        Terms.Keyword("Unsigned32")
-            .SkipAnd(TypeRefinementValue.Optional())
-            .Then(x => new Unsigned32(x.OrSome(Refinement.AllValues)));
-}
-
-// §7.1.2
-public class OctetString(Refinement refinement) : Type
-{
-    public Refinement Refinemnet = refinement;
-
-    // TypeOctetString = "OCTET" "STRING" TypeRefinementSize?
-    public static readonly Parser<OctetString> TypeOctetString =
-        Terms.Keyword("OCTET")
-            .SkipAnd(Terms.Keyword("STRING"))
-            .SkipAnd(TypeRefinementSize.Optional())
-            .Then(x => new OctetString(x.OrSome(Refinement.AllSizes)));
-}
-
-// §7.1.3
-public class ObjectIdentifierType : Type
-{
-    // TypeObjectIdentifier = "OBJECT" "IDENTIFIER"
-    public static readonly Parser<ObjectIdentifierType> TypeObjectIdentifier =
-        Terms.Keyword("OBJECT")
-            .AndSkip(Terms.Keyword("IDENTIFIER"))
-            .Then(_ => new ObjectIdentifierType());
-}
-
-// §7.1.4
-public class Bits(IReadOnlyList<(TextSpan, long)> values) : Type
-{
-    public IReadOnlyList<(TextSpan, long)> values = values;
-
-    // TypeBits = "BITS" TypeRefinementEnum
-    public static readonly Parser<Bits> TypeBits =
-        Terms.Keyword("BITS")
-            .SkipAnd(TypeRefinementEnum)
-            .Then(x => new Bits(x));
-}
-
-// §7.1.6
-public class Counter32 : Type
-{
-    // TypeCounter32 = "Counter32"
-    public static readonly Parser<Counter32> TypeCounter32 =
-        Terms.Keyword("Counter32")
-            .Then(_ => new Counter32());
-}
-
-// §7.1.10
-public class Counter64 : Type
-{
-    // TypeCounter64 = "Counter64"
-    public static readonly Parser<Counter64> TypeCounter64 =
-        Terms.Keyword("Counter64")
-            .Then(_ => new Counter64());
-}
-
-// §7.1.7
-public class Gauge32(Refinement refinement) : Type
-{
-    public Refinement refinement = refinement;
-
-    // TypeGauge32 = "Gauge32" TypeRefinementValue?
-    public static readonly Parser<Gauge32> TypeGauge32 =
-        Terms.Keyword("Gauge32")
-            .SkipAnd(TypeRefinementValue.Optional())
-            .Then(x => new Gauge32(x.OrSome(Refinement.AllValues)));
-}
-
-// §7.1.8
-public class TimeTicks : Type
-{
-    // TypeTimeTicks = "TimeTicks"
-    public static readonly Parser<TimeTicks> TypeTimeTicks =
-        Terms.Keyword("TimeTicks")
-            .Then(_ => new TimeTicks());
-}
-
-public class TextualConventionType(TextSpan name) : Type
-{
-    public TextSpan name = name;
-
-    // TypeTextualConvention = IDENT TypeRefinementValue
-    public static readonly Parser<TextualConventionType> TypeTextualConvention =
-        SMIv2.Ident
-            .And(TypeRefinementValue.Or(TypeRefinementSize).Optional())
-            .Then(x => new TextualConventionType(x.Item1));
+    public override int GetHashCode() =>
+        Kind.GetHashCode()
+            ^ Refinement?.GetHashCode() ?? 0
+            ^ Values?.Count ?? 0
+            ^ Name?.GetHashCode() ?? 0;
 }

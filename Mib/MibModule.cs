@@ -89,7 +89,7 @@ public class MibModule : IMibThatExports
 
         var entryTypes = module.Items
             .OfType<EntryDef>()
-            .ToDictionary(x => x.Name, x => x);
+            .ToDictionary(x => x.Name.ToString(), x => x);
 
         //
         // Second pass:
@@ -111,7 +111,7 @@ public class MibModule : IMibThatExports
         {
             var oid = GetOid(table.Name.ToString());
 
-            if (!entryTypes.TryGetValue(table.EntryType, out var entryDef))
+            if (!entryTypes.TryGetValue(table.EntryType.ToString(), out var entryDef))
             {
                 throw new Exception($"ConceptualTable({oid.OidNames}): No such EntryType '{table.EntryType}'");
             }
@@ -122,7 +122,7 @@ public class MibModule : IMibThatExports
                 throw new Exception($"ConceptualTable({oid}): No ConceptualRow at .1");
             }
 
-            if (table.EntryType != row.EntryType || table.Status != row.Status)
+            if (table.EntryType.ToString() != row.EntryType.ToString() || table.Status != row.Status)
             {
                 throw new Exception($"ConceptualTable({oid}) doesn't match ConceptualRow");
             }

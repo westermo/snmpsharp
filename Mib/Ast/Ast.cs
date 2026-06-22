@@ -54,9 +54,9 @@ public static class SMIv2 {
     //
 
     // OTSyntaxPart = "SYNTAX" Type
-    public static readonly Parser<TextSpan> OTSyntaxPart =
+    public static readonly Parser<Type> OTSyntaxPart =
         Terms.Keyword("SYNTAX")
-            .SkipAnd(Capture(Type.Parser.ElseError("Expected type after SYNTAX")))
+            .SkipAnd(Type.Parser.ElseError("Expected type after SYNTAX"))
             .WithName("OTSyntaxPart");
 
     // This is simply ignored
@@ -251,17 +251,17 @@ public class EntryDef(
 // See https://www.rfc-editor.org/rfc/rfc2579.html#section-3
 public class TextualConvention(
     TextSpan name,
-    TextSpan syntax
+    Type syntax
 ) : ModuleItem {
     public TextSpan Name { get; } = name;
-    public TextSpan Syntax { get; } = syntax;
+    public Type Syntax { get; } = syntax;
 
     //  TextualConvention = IDENT "::=" "TEXTUAL-CONVENTION"
     //       ("DISPLAY-HINT" <string>)?
     //       STATUS <status>
     //       DESCRIPTION <string>
     //       (REFERENCE <string>)?
-    //       SYNTAX <raw>
+    //       SYNTAX <type>
     new public static readonly Parser<TextualConvention> Parser =
         SMIv2.Ident
             .AndSkip(Terms.Text("::="))
@@ -397,14 +397,14 @@ public class NotificationType(
 public class ConceptualTable(
     TextSpan name,
     UnresolvedOid oid,
-    TextSpan entryType,
+    Type entryType,
     SMIv2Status status
 ) : OidAssigner(name, oid) {
-    public TextSpan EntryType { get; } = entryType;
+    public Type EntryType { get; } = entryType;
     public SMIv2Status Status { get; } = status;
 
     //  ConceptualTable = "OBJECT-TYPE"
-    //      "SYNTAX" "SEQUENCE" "OF" <ident>
+    //      "SYNTAX" "SEQUENCE" "OF" <type>
     //      OTMiddlePart
     //      OidAssignment
     public static readonly Parser<ConceptualTable> InnerParser =
@@ -413,7 +413,7 @@ public class ConceptualTable(
             .AndSkip(Terms.Keyword("SYNTAX"))
             .AndSkip(Terms.Keyword("SEQUENCE"))
             .AndSkip(Terms.Keyword("OF"))
-            .And(SMIv2.Ident)
+            .And(Type.Parser.ElseError("Expected entry type after SEQUENCE OF"))
             .And(SMIv2.OTMiddlePart)
             .And(SMIv2.OidAssignment("OBJECT-TYPE ConceptualTable"))
             .Then(static x => new ConceptualTable(
@@ -427,11 +427,11 @@ public class ConceptualTable(
 public class ConceptualRow(
     TextSpan name,
     UnresolvedOid oid,
-    TextSpan entryType,
+    Type entryType,
     SMIv2Status status,
     IReadOnlyList<TextSpan> index
 ) : OidAssigner(name, oid) {
-    public TextSpan EntryType { get; } = entryType;
+    public Type EntryType { get; } = entryType;
     public SMIv2Status Status { get; } = status;
     public IReadOnlyList<TextSpan> Index { get; } = index;
 
@@ -475,10 +475,10 @@ public class ConceptualRow(
 public class LeafObject(
     TextSpan name,
     UnresolvedOid oid,
-    TextSpan syntax,
+    Type syntax,
     SMIv2Status status
 ) : OidAssigner(name, oid) {
-    public TextSpan Syntax { get; } = syntax;
+    public Type Syntax { get; } = syntax;
     public SMIv2Status Status { get; } = status;
 
     // This is simply ignored
