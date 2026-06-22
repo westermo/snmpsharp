@@ -1,13 +1,15 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
+using Mib.Ast;
 using Parlot;
+using Parlot.Compilation;
 using Parlot.Fluent;
 using static Parlot.Fluent.Parsers;
 
 namespace SnmpSharpNet.Mib.Ast;
 
 using Import = (IReadOnlyList<TextSpan> symbols, TextSpan fromModule);
-using UnresolvedOid = (TextSpan parent, long oid);
 
 // Common helpers for ASN.1 / Structure of Management Information Version 2
 // See https://www.rfc-editor.org/rfc/rfc2578.html
@@ -21,62 +23,81 @@ public static class SMIv2 {
 
     // IDENT = [a-zA-Z][a-zA-Z0-9-_]*
     public static readonly Parser<TextSpan> Ident =
-        Terms.Identifier(extraPart: c => c == '-' || c == '_');
+        Terms.Identifier(extraPart: c => c == '-' || c == '_').WithName("Ident");
 
     public static readonly Parser<IReadOnlyList<TextSpan>> Idents =
-        Separated(Terms.Char(','), Ident);
+        Separated(Terms.Char(','), Ident).WithName("Idents");
     
     // Block[x] = "{" x "}"
     public static Parser<T> Block<T>(Parser<T> inner) =>
-        Between(Terms.Char('{'), inner, Terms.Char('}'));
+        Between(Terms.Char('{'), inner, Terms.Char('}')).WithName("Block");
 
-    // OidAssignment = "::=" "{" IDENT <number> "}"
-    public static readonly Parser<UnresolvedOid> OidAssignment =
-        Terms.Text("::=").ElseError("Expected '::=' in assignment")
-            .SkipAnd(Terms.Char('{').ElseError("Expected '{' after '::='"))
-            .SkipAnd(Ident.ElseError("Expected OID parent name"))
-            .And(Terms.Integer().ElseError("Expected OID number"))
-            .AndSkip(Terms.Char('}').ElseError("Expected '}'"));
+    // OidAssignment = "::=" "{" IDENT ( IDENT "(" <number> ")" )* <number> "}"
+    public static Parser<UnresolvedOid> OidAssignment(string context) =>
+        Terms.Text("::=").ElseError($"Expected '::=' in {context}")
+            .SkipAnd(Terms.Char('{').ElseError($"Expected '{{' after '::=' in {context}"))
+            .SkipAnd(Ident.ElseError($"Expected OID parent name in {context}"))
+            .And(
+                Ident
+                .AndSkip(Terms.Char('(').ElseError($"Expected '(' after OID component name in {context}"))
+                .And(Terms.Integer().ElseError($"Expected OID number during {context}"))
+                .AndSkip(Terms.Char(')').ElseError($"Expected ')' after OID component number in {context}"))
+                .ZeroOrMany()
+            )
+            .And(Terms.Integer().ElseError($"Expected OID number during {context}"))
+            .AndSkip(Terms.Char('}').ElseError($"Expected '}}' in {context}"))
+            .Then(static x => new UnresolvedOid(x.Item1, x.Item2, x.Item3))
+            .WithName("OidAssignment");
 
     //
     // OBJECT-TYPE and NOTIFICATION-TYPE helpers
     //
 
-    // SyntaxPart = "SYNTAX" <raw> $
-    public static readonly Parser<TextSpan> SyntaxPart =
+    // OTSyntaxPart = "SYNTAX" Type
+    public static readonly Parser<TextSpan> OTSyntaxPart =
         Terms.Keyword("SYNTAX")
-            .SkipAnd(Literals.WhiteSpace())
-            .SkipAnd(AnyCharBefore(Literals.Char('\n')));
+            .SkipAnd(Capture(Type.Parser.ElseError("Expected type after SYNTAX")))
+            .WithName("OTSyntaxPart");
 
     // This is simply ignored
     // OTMaxAccessPart = "MAX-ACCESS" <string>
     public static readonly Parser<TextSpan> OTMaxAccessPart =
         Terms.Keyword("MAX-ACCESS")
-            .SkipAnd(Ident);
+            .SkipAnd(Ident)
+            .WithName("OTMaxAccessPart");
 
     // OTStatusPart = "STATUS" ("current" | "deprecated" | "obsolete")
     public static readonly Parser<SMIv2Status> OTStatusPart =
-        Terms.Keyword("STATUS").SkipAnd(OneOf(
-                Terms.Keyword("current").Then(static x => SMIv2Status.Current),
-                Terms.Keyword("deprecated").Then(static x => SMIv2Status.Deprecated),
-                Terms.Keyword("obsolete").Then(static x => SMIv2Status.Obsolete)
-        ).ElseError("Expected 'current', 'deprecated', or 'obsolete' after STATUS"));
+        Terms.Keyword("STATUS")
+            .SkipAnd(
+                OneOf(
+                    Terms.Keyword("current").Then(static x => SMIv2Status.Current),
+                    Terms.Keyword("deprecated").Then(static x => SMIv2Status.Deprecated),
+                    Terms.Keyword("obsolete").Then(static x => SMIv2Status.Obsolete)
+                ).ElseError("Expected 'current', 'deprecated', or 'obsolete' after STATUS")
+            ).WithName("OTStatusPart");
 
 
     // This is simply ignored
     // OTDescriptionPart = "DESCRIPTION" <string>
     public static readonly Parser<TextSpan> OTDescriptionPart =
-        Terms.Keyword("DESCRIPTION").SkipAnd(Terms.String().ElseError("Expected string after DESCRIPTION"));
+        Terms.Keyword("DESCRIPTION")
+            .SkipAnd(Terms.String().ElseError("Expected string after DESCRIPTION"))
+            .WithName("OTDescriptionPart");
 
     // This is simply ignored
     // OTReferPart = "REFERENCE" <string>
     public static readonly Parser<TextSpan> OTReferPart =
-        Terms.Keyword("REFERENCE").SkipAnd(Terms.String());
+        Terms.Keyword("REFERENCE")
+            .SkipAnd(Terms.String().ElseError("Expected string after REFERENCE"))
+            .WithName("OTReferPart");
 
     // This is simply ignored
     // OTUnitsPart = "UNITS" <string>
     public static readonly Parser<TextSpan> OTUnitsPart =
-        Terms.Keyword("UNITS").SkipAnd(Terms.String());
+        Terms.Keyword("UNITS")
+            .SkipAnd(Terms.String().ElseError("Expected string after UNITS"))
+            .WithName("OTUnitsPart");
 
     // Note: Currently we only return status
     //  OTMiddlePart =
@@ -87,12 +108,25 @@ public static class SMIv2 {
     //      OTReferPart?
     public static readonly Parser<SMIv2Status> OTMiddlePart =
         OTUnitsPart.ZeroOrOne()
-            .AndSkip(OTMaxAccessPart)
-            .SkipAnd(OTStatusPart)
+            .AndSkip(OTMaxAccessPart.ElseError("Expected 'MAX-ACCESS' in object type"))
+            .SkipAnd(OTStatusPart.ElseError("Expected 'STATUS' in object type"))
             .AndSkip(OTDescriptionPart.ZeroOrOne())
-            .AndSkip(OTReferPart.ZeroOrOne());
+            .AndSkip(OTReferPart.ZeroOrOne())
+            .WithName("OTMiddlePart");
 }
+
+
  
+public class UnresolvedOid(
+    TextSpan parent,
+    IReadOnlyList<(TextSpan Name, long Number)> components,
+    long oid
+) {
+    public TextSpan Parent { get; } = parent;
+    public IReadOnlyList<(TextSpan Name, long Number)> Components { get; } = components;
+    public long Oid { get; } = oid;
+};
+
 public enum SMIv2Status
 {
     Current,
@@ -139,25 +173,10 @@ public class ModuleDefinition(
             .And(ImportsParser.Optional().Then(static x => x.OrSome([])))
             .And(ModuleItem.Parser.ZeroOrMany())
             .AndSkip(Terms.Keyword("END").ElseError("Expected 'END' or a valid top-level definition"))
-            .Then(static x => new ModuleDefinition(x.Item1, x.Item2, x.Item3, x.Item4));
+            .Then(static x => new ModuleDefinition(x.Item1, x.Item2, x.Item3, x.Item4))
+            .WithName("ModuleDefinition");
 
     public static Parser<ModuleDefinition> EntryPoint = Module;
-
-    public static ModuleDefinition Parse(string contents)
-    {
-        var context = new ParseContext(new Scanner(contents))
-        {
-            WhiteSpaceParser = SMIv2.MibWhiteSpace
-        };
-        
-        Module.Compile().TryParse(context, out var result, out var error);
-        if (error is not null)
-        {
-            throw new FormatException($"Failed to parse MIB module @ {error?.Position}: '{error?.Message}'");
-        }
-
-        return result;
-    }
 };
 
 
@@ -166,10 +185,14 @@ public abstract class ModuleItem
 {
     // ModuleItem = EntryDef
     //            | TextualConvention
-    //            | ObjectGroup // Compliance, ignored
+    //            // Compliance, ignored
+    //            | ObjectGroup
+    //            | NotificationGroup
     //            | ModuleCompliance
-    //            | ObjectIdentifier // Assignments 
+    //            // Assignments 
+    //            | ObjectIdentifier | ObjectIdentity
     //            | ModuleIdentity
+    //            | NotificationType
     //            | ConceptualTable
     //            | ConceptualRow
     //            | LeafObject
@@ -178,14 +201,16 @@ public abstract class ModuleItem
             EntryDef.Parser,
             TextualConvention.Parser,
             MacroObjectGroup.InnerParser,
+            MacroNotificationGroup.InnerParser,
             MacroModuleCompliance.InnerParser,
-            // Assignment
             ObjectIdentifier.InnerParser,
+            ObjectIdentifier.ObjectIdentity,
             ModuleIdentity.InnerParser,
+            NotificationType.InnerParser,
             ConceptualTable.InnerParser,
             ConceptualRow.InnerParser,
             LeafObject.InnerParser
-        );
+        ).WithName("ModuleItem");
 }
 
 public abstract class OidAssigner(
@@ -201,10 +226,10 @@ public abstract class OidAssigner(
 // OBJECT-TYPE with SYNTAX SEQUENCE OF <EntryType>
 public class EntryDef(
     TextSpan name,
-    IReadOnlyList<(TextSpan name, TextSpan type)> fields
+    IReadOnlyList<(TextSpan name, Type type)> fields
 ) : ModuleItem {
     public TextSpan Name { get; } = name;
-    public IReadOnlyList<(TextSpan name, TextSpan type)> Fields { get; } = fields;
+    public IReadOnlyList<(TextSpan name, Type type)> Fields { get; } = fields;
 
     //  EntryDef = IDENT "::=" "SEQUENCE" "{"
     //      (RowEntryItem ",")* RowEntryItem
@@ -215,9 +240,10 @@ public class EntryDef(
             .AndSkip(Terms.Text("::="))
             .AndSkip(Terms.Keyword("SEQUENCE"))
             .And(SMIv2.Block(
-                Separated(Terms.Char(','), SMIv2.Ident.And(SMIv2.Ident))
+                Separated(Terms.Char(','), SMIv2.Ident.And(Type.Parser))
             ))
-            .Then(static x => new EntryDef(x.Item1, x.Item2));
+            .Then(static x => new EntryDef(x.Item1, x.Item2))
+            .WithName("EntryDef");
 }
 
 // SNMP `TEXTUAL-CONVENTION`
@@ -244,8 +270,9 @@ public class TextualConvention(
             .AndSkip(SMIv2.OTStatusPart)
             .AndSkip(SMIv2.OTDescriptionPart)
             .AndSkip(SMIv2.OTReferPart.ZeroOrOne())
-            .And(Terms.Keyword("SYNTAX").SkipAnd(AnyCharBefore(Literals.Char('\n'))))
-            .Then(static x => new TextualConvention(x.Item1, x.Item2));
+            .And(SMIv2.OTSyntaxPart)
+            .Then(static x => new TextualConvention(x.Item1, x.Item2))
+            .WithName("TextualConvention");
 }
 
 // ASN.1 `OBJECT IDENTIFIER`
@@ -260,8 +287,25 @@ public class ObjectIdentifier(
         SMIv2.Ident
             .AndSkip(Terms.Keyword("OBJECT"))
             .AndSkip(Terms.Keyword("IDENTIFIER"))
-            .And(SMIv2.OidAssignment)
-            .Then(static x => new ObjectIdentifier(x.Item1, x.Item2));
+            .And(SMIv2.OidAssignment("OBJECT IDENTIFIER"))
+            .Then(static x => new ObjectIdentifier(x.Item1, x.Item2))
+            .WithName("ObjectIdentifier");
+
+    // Seldom used variant with some extra metadata
+    //
+    // ObjectIdentity =
+    //      IDENT "OBJECT-IDENTITY"
+    //      OTStatusPart OTDescriptionPart OTReferPart?
+    //      OidAssignment
+    public static readonly Parser<ObjectIdentifier> ObjectIdentity =
+        SMIv2.Ident
+            .AndSkip(Terms.Keyword("OBJECT-IDENTITY"))
+            .AndSkip(SMIv2.OTStatusPart)
+            .AndSkip(SMIv2.OTDescriptionPart)
+            .AndSkip(SMIv2.OTReferPart.ZeroOrOne())
+            .And(SMIv2.OidAssignment("OBJECT-IDENTITY"))
+            .Then(static x => new ObjectIdentifier(x.Item1, x.Item2))
+            .WithName("ObjectIdentity");
 }
 
 // SNMP `MODULE-IDENTITY`
@@ -293,6 +337,7 @@ public class ModuleIdentity(
     //      "CONTACT-INFO" <string>
     //      "DESCRIPTION"  <string>
     //      Revision*
+    //      OidAssignment
     public static readonly Parser<ModuleIdentity> InnerParser =
         SMIv2.Ident
             .AndSkip(Terms.Keyword("MODULE-IDENTITY"))
@@ -305,10 +350,45 @@ public class ModuleIdentity(
             .AndSkip(Terms.Keyword("DESCRIPTION").ElseError("Expected 'DESCRIPTION' in MODULE-IDENTITY"))
             .And(Terms.String().ElseError("Expected string after DESCRIPTION"))
             .And(Revision.ZeroOrMany())
-            .And(SMIv2.OidAssignment)
+            .And(SMIv2.OidAssignment("MODULE-IDENTITY"))
             .Then(static x => new ModuleIdentity(
                 x.Item1, x.Item7,
-                x.Item2, x.Item3, x.Item4, x.Item5, x.Item6));
+                x.Item2, x.Item3, x.Item4, x.Item5, x.Item6))
+            .WithName("ModuleIdentity");
+}
+
+// SNMP `NOTIFICATION-TYPE`
+public class NotificationType(
+    TextSpan name,
+    UnresolvedOid oid,
+    SMIv2Status status,
+    IReadOnlyList<TextSpan> objects
+) : OidAssigner(name, oid) {
+    public SMIv2Status Status { get; } = status;
+    public IReadOnlyList<TextSpan> Objects { get; } = objects;
+
+    // ObjectsPart = "OBJECTS" "{" Objects "}" | empty
+    static readonly Parser<IReadOnlyList<TextSpan>> ObjectsPart =
+        Terms.Keyword("OBJECTS")
+            .SkipAnd(SMIv2.Block(SMIv2.Idents));
+
+    // NotificationType = IDENT "NOTIFICATION-TYPE"
+    //      ObjectsPart?
+    //      OTStatusPart
+    //      OTDescriptionPart
+    //      OTReferPart?
+    //      OidAssignment
+    public static readonly Parser<NotificationType> InnerParser =
+        SMIv2.Ident
+            .AndSkip(Terms.Keyword("NOTIFICATION-TYPE"))
+            .And(ObjectsPart.Optional().Then(static x => x.OrSome([])))
+            .And(SMIv2.OTStatusPart)
+            .AndSkip(SMIv2.OTDescriptionPart)
+            .AndSkip(SMIv2.OTReferPart.ZeroOrOne())
+            .And(SMIv2.OidAssignment("NOTIFICATION-TYPE"))
+            .Then(static x => new NotificationType(
+                x.Item1, x.Item4, x.Item3, x.Item2))
+            .WithName("NotificationType");
 }
 
 // A "Conceptual Table" in 7.1.12 "Conceptual Tables" of RFC2578
@@ -326,6 +406,7 @@ public class ConceptualTable(
     //  ConceptualTable = "OBJECT-TYPE"
     //      "SYNTAX" "SEQUENCE" "OF" <ident>
     //      OTMiddlePart
+    //      OidAssignment
     public static readonly Parser<ConceptualTable> InnerParser =
         SMIv2.Ident
             .AndSkip(Terms.Keyword("OBJECT-TYPE"))
@@ -334,9 +415,10 @@ public class ConceptualTable(
             .AndSkip(Terms.Keyword("OF"))
             .And(SMIv2.Ident)
             .And(SMIv2.OTMiddlePart)
-            .And(SMIv2.OidAssignment)
+            .And(SMIv2.OidAssignment("OBJECT-TYPE ConceptualTable"))
             .Then(static x => new ConceptualTable(
-                x.Item1, x.Item4, x.Item2, x.Item3));
+                x.Item1, x.Item4, x.Item2, x.Item3))
+            .WithName("ConceptualTable");
 }
 
 // A "Conceptual Row" in 7.1.12 "Conceptual Tables" of RFC2578
@@ -365,8 +447,8 @@ public class ConceptualRow(
     //             | "AUGMENTS" "{" Entry      "}"
     // OTIndexItems = (IDENT ",")* "IMPLIED" IDENT
     //              | (IDENT ",")* IDENT
-    public static readonly Parser<IReadOnlyList<TextSpan>> ObjectTypeIndexPart =
-        Terms.Keyword("INDEX")
+    public static readonly Parser<IReadOnlyList<TextSpan>> OTIndexPart =
+        Terms.Keyword("INDEX").Or(Terms.Keyword("AUGMENTS"))
             .SkipAnd(SMIv2.Block(SMIv2.Idents));
 
     //  ConceptualRow = "OBJECT-TYPE"
@@ -376,16 +458,17 @@ public class ConceptualRow(
     //      ("DESCRIPTION" <string>)?
     //      ("REFERENCE" <string>)?
     //      ("INDEX" "{" ident, ... "}")?
+    //      OidAssignment
     public static readonly Parser<ConceptualRow> InnerParser =
         SMIv2.Ident
             .AndSkip(Terms.Keyword("OBJECT-TYPE"))
-            .AndSkip(Terms.Keyword("SYNTAX"))
-            .And(SMIv2.Ident)
+            .And(SMIv2.OTSyntaxPart)
             .And(SMIv2.OTMiddlePart)
-            .And(ObjectTypeIndexPart)
-            .And(SMIv2.OidAssignment)
+            .And(OTIndexPart)
+            .And(SMIv2.OidAssignment("OBJECT-TYPE ConceptualRow"))
             .Then(static x => new ConceptualRow(
-                x.Item1, x.Item5, x.Item2, x.Item3, x.Item4));
+                x.Item1, x.Item5, x.Item2, x.Item3, x.Item4))
+            .WithName("ConceptualRow");
 }
 
 // OBJECT-TYPE for leafs
@@ -399,21 +482,27 @@ public class LeafObject(
     public SMIv2Status Status { get; } = status;
 
     // This is simply ignored
-    // DefValPart = "DEFVAL" "{" <raw> "}"
-    public static readonly Parser<TextSpan> DefValPart =
-        Terms.Keyword("DEFVAL")
-            .SkipAnd(SMIv2.Block(AnyCharBefore(Terms.Char('}'))));
+    // DefValPart = "DEFVAL" "{" "{" IDENT ("," IDENT)* "}""}"
+    //            | "DEFVAL" "{" <raw> "}"
+    public static readonly Parser<TextSpan> OTDefValPart =
+        Terms.Keyword("DEFVAL").SkipAnd(SMIv2.Block(
+            OneOf(
+                Capture(SMIv2.Block(SMIv2.Idents.Optional())),
+                AnyCharBefore(Terms.Char('}'))
+            ).ElseError("Expected DEFVAL value")
+        )).WithName("OTDefValPart");
 
-    // LeafObject = IDENT "OBJECT-TYPE" SyntaxPart OTMiddlePart DefValPart OidAssignment
+    // LeafObject = IDENT "OBJECT-TYPE" OTSyntaxPart OTMiddlePart OTDefValPart OidAssignment
     public static readonly Parser<LeafObject> InnerParser =
         SMIv2.Ident
             .AndSkip(Terms.Keyword("OBJECT-TYPE"))
-            .And(SMIv2.SyntaxPart)
+            .And(SMIv2.OTSyntaxPart)
             .And(SMIv2.OTMiddlePart)
-            .AndSkip(DefValPart.ZeroOrOne())
-            .And(SMIv2.OidAssignment)
+            .AndSkip(OTDefValPart.ZeroOrOne())
+            .And(SMIv2.OidAssignment("OBJECT-TYPE leaf object"))
             .Then(static x => new LeafObject(
-                x.Item1, x.Item4, x.Item2, x.Item3));
+                x.Item1, x.Item4, x.Item2, x.Item3))
+            .WithName("LeafObject");
 }
 
 // SNMP `OBJECT-GROUP`
@@ -432,7 +521,28 @@ public class MacroObjectGroup : ModuleItem {
             .AndSkip(Terms.Keyword("OBJECT-GROUP"))
             .AndSkip(AnyCharBefore(Literals.Text("::="), consumeDelimiter: true))
             .AndSkip(SMIv2.Block(AnyCharBefore(Terms.Char('}'))))
-            .Then(static x => instance);
+            .Then(static x => instance)
+            .WithName("ObjectGroup");
+}
+
+// SNMP `NOTIFICATION-GROUP`
+// Note: Since we don't care about compliance, we cheat when parsing this
+public class MacroNotificationGroup : ModuleItem {
+    private static readonly MacroNotificationGroup instance = new();
+
+    //  NotificationGroup = IDENT "NOTIFICATION-GROUP"
+    //      "NOTIFICATIONS" "{" <raw> "}"
+    //      "STATUS" <status>
+    //      "DESCRIPTION" <string>
+    //      ("REFERENCE" <string>)?
+    //      "::=" "{" <raw> "}"
+    public static readonly Parser<MacroNotificationGroup> InnerParser =
+        SMIv2.Ident
+            .AndSkip(Terms.Keyword("NOTIFICATION-GROUP"))
+            .AndSkip(AnyCharBefore(Literals.Text("::="), consumeDelimiter: true))
+            .AndSkip(SMIv2.Block(AnyCharBefore(Terms.Char('}'))))
+            .Then(static x => instance)
+            .WithName("NotificationGroup");
 }
 
 // SNMP `MODULE-COMPLIANCE` macro
@@ -460,5 +570,6 @@ public class MacroModuleCompliance : ModuleItem {
             .AndSkip(Terms.Keyword("MODULE-COMPLIANCE"))
             .AndSkip(AnyCharBefore(Literals.Text("::="), consumeDelimiter: true))
             .AndSkip(SMIv2.Block(AnyCharBefore(Terms.Char('}'))))
-            .Then(static x => instance);
+            .Then(static x => instance)
+            .WithName("ModuleCompliance");
 }

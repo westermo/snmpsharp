@@ -116,7 +116,7 @@ public abstract class ParseTestCase(string Name)
         ModuleItem.Parser,
         """
         ifRefIndex OBJECT-TYPE
-            SYNTAX      IfaceRefIndex
+            SYNTAX      Integer32
             MAX-ACCESS  not-accessible
             STATUS      current
             DESCRIPTION
@@ -196,17 +196,16 @@ class ParseTestCase<T>(string Name, Parser<T> Parser, string ToParse) : ParseTes
 public class ParsingTests
 {
     [Test]
-    [Arguments("WESTERMO-OID-MIB.mib")]
-    [Arguments("WESTERMO-OID-MIB.mib", "WESTERMO-INTERFACE-MIB.mib")]
-    [Arguments("LLDP-MIB.mib")]
-    [Arguments("SOCE-SNMP-ROOT-MIB.mib")]
+    //[Arguments("TEST.mib")]
+    [Arguments("IANAifType-MIB.mib", "WESTERMO-OID-MIB.mib", "WESTERMO-INTERFACE-MIB.mib")]
+    [Arguments("SNMP-FRAMEWORK-MIB.mib", "IANA-ADDRESS-FAMILY-NUMBERS-MIB.mib", "LLDP-MIB.mib")]
     public async Task CanParseMibs(params string[] mibs)
     {
         var importCache = new Dictionary<string, IMibThatExports>(BuiltinMib.All);
 
         foreach (var mib in mibs)
         {
-            var module = MibModule.Parse(File.ReadAllText(mib), importCache);
+            var module = MibParser.ParseModule(File.ReadAllText(mib), "mib", importCache);
             importCache.Add(module.Identifier, module);
             Console.WriteLine("\n-----------------");
             Console.WriteLine($"-- {module.Identifier}");

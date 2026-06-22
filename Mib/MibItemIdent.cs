@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 
 namespace SnmpSharpNet.Mib;
@@ -56,4 +58,16 @@ public readonly struct MibItemIdent(uint[] oid, string?[] path)
             })
         );
     }
+
+
+    // See Annex A "Top-level arcs of the OID tree" of ITU-T X.660
+    public static MibItemIdent RootItut = new([1], [".itu-t"]);
+    public static MibItemIdent RootIso = new([1], [".iso"]);
+    public static MibItemIdent RootJoint = new([1], [".joint-iso-itu-t"]);
+    public static IReadOnlyDictionary<string, MibItemIdent> TopLevelArcs = new Dictionary<string, MibItemIdent>
+    {
+        { "itu-t", RootItut }, { "ccitt", RootItut },
+        { "iso", RootIso },
+        { "joint-iso-itu-t", RootJoint }, { "joint-iso-ccitt", RootJoint },
+    };
 }

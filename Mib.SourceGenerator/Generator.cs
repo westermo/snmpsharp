@@ -139,7 +139,7 @@ public sealed class SnmpGenerator : IIncrementalGenerator
             try
             {
                 var mibText = mibContents?.ToString() ?? string.Empty;
-                var module = MibModule.Parse(mibText, modules);
+                var module = MibParser.ParseModule(mibText, mibPath, modules);
                 
                 // Only add if not already present (Parse may have added it via imports/includes)
                 if (!modules.ContainsKey(module.Identifier))

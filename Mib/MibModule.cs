@@ -1,56 +1,13 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using Parlot;
 using SnmpSharpNet.Mib.Ast;
 
 namespace SnmpSharpNet.Mib;
 
-class OidComparer : IEqualityComparer<uint[]>
-{
-    public static readonly OidComparer Instance = new();
-    public bool Equals(uint[]? x, uint[]? y) => x != null && y != null && x.SequenceEqual(y);
-    public int GetHashCode(uint[] obj)
-    {
-        unchecked
-        {
-            int hash = 17;
-            foreach (var v in obj) { hash = hash * 31 + (int)v; }
-            return hash;
-        }
-    }
-}
-
-
-
 public interface IMibThatExports
 {
     public bool TryImport(string ident, out uint[]? oid, out string? syntax);
-}
-
-
-
-public static class Extensions
-{
-    extension(uint[] oid)
-    {
-        public uint[] Add(uint value)
-        {
-            var newOid = new uint[oid.Length+1];
-            Array.Copy(oid, newOid, oid.Length);
-            newOid[oid.Length] = value;
-            return newOid;
-        }
-    }
-
-    extension(MibItemIdent self)
-    {
-        public MibItemIdent Add(TextSpan ident, uint value)
-        {
-            return self.Add(value, ident.ToString());
-        }
-    }
 }
 
 public class MibModule : IMibThatExports
@@ -58,11 +15,11 @@ public class MibModule : IMibThatExports
     public readonly string Identifier;
     public readonly Dictionary<MibItemIdent, MibItem> Items = [];
 
-    public MibModule(ModuleDefinition module, IDictionary<string, IMibThatExports> importables)
+    public MibModule(ModuleDefinition module, IReadOnlyDictionary<string, IMibThatExports> importables)
     {
         Identifier = module.Identifier.ToString();
 
-        var importedOids = new Dictionary<string, MibItemIdent>();
+        var externalOids = MibItemIdent.TopLevelArcs.ToDictionary(x => x.Key, x => x.Value);
 
         // Add imported names to oidCache
         foreach (var (symbols, fromModule) in module.Imports)
@@ -72,7 +29,7 @@ public class MibModule : IMibThatExports
             {
                 if (importedModule.TryImport(symbol.ToString(), out var oid, out _) && oid != null)
                 {
-                    importedOids.Add(
+                    externalOids.Add(
                         symbol.ToString(),
                         new MibItemIdent(oid, [$"<{fromModule}>", symbol.ToString()])
                     );
@@ -94,7 +51,7 @@ public class MibModule : IMibThatExports
         MibItemIdent GetOid(string name)
         {
             if (oidByName.TryGetValue(name, out var cached)) { return cached; }
-            if (importedOids.TryGetValue(name, out cached)) { return cached; }
+            if (externalOids.TryGetValue(name, out cached)) { return cached; }
 
             if (!currentlyResolving.Add(name))
             {
@@ -106,8 +63,12 @@ public class MibModule : IMibThatExports
                 throw new Exception($"Identifier '{name}' is missing");
             }
 
-            var parent = GetOid(item.Oid.parent.ToString());
-            var resolved = parent.Add(item.Name, (uint)item.Oid.oid);
+            var parent = GetOid(item.Oid.Parent.ToString());
+            foreach (var (compName, compNumber) in item.Oid.Components)
+            {
+                parent = parent.Add((uint)compNumber, compName.ToString());
+            }
+            var resolved = parent.Add((uint)item.Oid.Oid, item.Name.ToString());
             oidByName[name] = resolved;
             itemByOid[resolved] = item;
             return resolved;
@@ -195,7 +156,6 @@ public class MibModule : IMibThatExports
                 Items.Remove(item.Ident);
             }
         }
-
     }
 
     //
@@ -218,11 +178,6 @@ public class MibModule : IMibThatExports
             return true;
         }
         return false;
-    }
-
-    public static MibModule Parse(string text, IDictionary<string, IMibThatExports> importables)
-    {
-        return new MibModule(ModuleDefinition.Parse(text), importables);
     }
 
     public override string ToString()

@@ -117,12 +117,41 @@ public class BuiltinMib(
         []
     );
 
-    // RFC 2233 - IANAifType-MIB
-    public static readonly BuiltinMib IANAifTypeMIB = new(
-        [],
+    // RFC 2021 - RMON2-MIB
+    // This one IMPORTS stuff from the SNMPv1 era. Let's avoid that.
+    public static readonly BuiltinMib RMON2MIB = new(
+        new Dictionary<string, uint[]>
+        {
+            ["rmon"] = [1, 3, 6, 1, 4, 1, 9, 9, 16],
+            ["rmonEvents"] = [1, 3, 6, 1, 4, 1, 9, 9, 16, 0],
+            ["statistics"] = [1, 3, 6, 1, 4, 1, 9, 9, 16, 1],
+            ["history"] = [1, 3, 6, 1, 4, 1, 9, 9, 16, 2],
+            ["alarm"] = [1, 3, 6, 1, 4, 1, 9, 9, 16, 3],
+            ["hosts"] = [1, 3, 6, 1, 4, 1, 9, 9, 16, 4],
+            ["hostTopN"] = [1, 3, 6, 1, 4, 1, 9, 9, 16, 5],
+            ["matrix"] = [1, 3, 6, 1, 4, 1, 9, 9, 16, 6],
+            ["filter"] = [1, 3, 6, 1, 4, 1, 9, 9, 16, 7],
+            ["capture"] = [1, 3, 6, 1, 4, 1, 9, 9, 16, 8],
+            ["event"] = [1, 3, 6, 1, 4, 1, 9, 9, 16, 9],
+            ["tokenRing"] = [1, 3, 6, 1, 4, 1, 9, 9, 16, 10],
+            ["protocolDir"] = [1, 3, 6, 1, 4, 1, 9, 9, 16, 11],
+            ["protocolDistribution"] = [1, 3, 6, 1, 4, 1, 9, 9, 16, 12],
+            ["addressMap"] = [1, 3, 6, 1, 4, 1, 9, 9, 16, 13],
+            ["nlHost"] = [1, 3, 6, 1, 4, 1, 9, 9, 16, 14],
+            ["nlMatrix"] = [1, 3, 6, 1, 4, 1, 9, 9, 16, 15],
+            ["alHost"] = [1, 3, 6, 1, 4, 1, 9, 9, 16, 16],
+            ["alMatrix"] = [1, 3, 6, 1, 4, 1, 9, 9, 16, 17],
+            ["usrHistory"] = [1, 3, 6, 1, 4, 1, 9, 9, 16, 18],
+            ["probeConfig"] = [1, 3, 6, 1, 4, 1, 9, 9, 16, 19],
+            ["rmonConformance"] = [1, 3, 6, 1, 4, 1, 9, 9, 16, 20],
+        },
         new Dictionary<string, string>
         {
-            ["IANAifType"] = "INTEGER",
+            ["ZeroBasedCounter32"] = "Gauge32",
+            ["LastCreateTime"] = "TimeStamp",
+            ["TimeFilter"] = "TimeTicks",
+            ["DataSource"] = "OBJECT IDENTIFIER",
+            ["ControlString"] = "DisplayString",
         },
         []
     );
@@ -133,6 +162,6 @@ public class BuiltinMib(
         ["SNMPv2-TC"] = SNMPv2TC,
         ["SNMPv2-CONF"] = SNMPv2CONF,
         ["IF-MIB"] = IFMIB,
-        ["IANAifType-MIB"] = IANAifTypeMIB,
+        ["RMON2-MIB"] = RMON2MIB,
     };
 }

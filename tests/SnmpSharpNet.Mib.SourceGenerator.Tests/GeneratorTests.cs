@@ -1,7 +1,7 @@
 using SnmpSharpNet;
 using SnmpSharpNet.Mib.Attributes;
 
-[assembly: MibModules("WESTERMO-OID-MIB", "WESTERMO-INTERFACE-MIB")]
+[assembly: MibModules("IANAifType-MIB", "WESTERMO-OID-MIB", "WESTERMO-INTERFACE-MIB")]
 
 namespace SnmpSharpNet.Mib.SourceGenerator.IntegrationTests;
 
