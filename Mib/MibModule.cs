@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Parlot;
 using SnmpSharpNet.Mib.Ast;
 
 namespace SnmpSharpNet.Mib;
@@ -117,17 +118,33 @@ public class MibModule : IMibThatExports
             }
 
             var rowOid = oid.Add(1, null);
-            if (!itemByOid.TryGetValue(rowOid, out var _row) || _row is not ConceptualRow row)
+            if (!itemByOid.TryGetValue(rowOid, out var rowAssigner))
             {
-                throw new Exception($"ConceptualTable({oid}): No ConceptualRow at .1");
+                throw new Exception($"ConceptualTable({oid}): No item at .1");
             }
 
-            if (table.EntryType.ToString() != row.EntryType.ToString() || table.Status != row.Status)
+            IReadOnlyList<TextSpan> rowIndex;
+            if (rowAssigner is ConceptualRow row)
             {
-                throw new Exception($"ConceptualTable({oid}) doesn't match ConceptualRow");
+                if (table.EntryType.ToString() != row.EntryType.ToString() || table.Status != row.Status)
+                    throw new Exception($"ConceptualTable({oid}) doesn't match ConceptualRow");
+                rowIndex = row.Index;
+            }
+            else if (rowAssigner is AugmentingConceptualRow augRow)
+            {
+                if (table.EntryType.ToString() != augRow.EntryType.ToString() || table.Status != augRow.Status)
+                    throw new Exception($"ConceptualTable({oid}) doesn't match AugmentingConceptualRow");
+                var baseRowName = augRow.Augments.ToString();
+                if (!assignersByName.TryGetValue(baseRowName, out var _baseRow) || _baseRow is not ConceptualRow baseRow)
+                    throw new Exception($"ConceptualTable({oid}): AUGMENTS base row '{baseRowName}' not found in this module");
+                rowIndex = baseRow.Index;
+            }
+            else
+            {
+                throw new Exception($"ConceptualTable({oid}): .1 is not a ConceptualRow or AugmentingConceptualRow");
             }
 
-            var index = row.Index
+            var index = rowIndex
                 .Select((name, idx) => {
                     if (Items[GetOid(name.ToString())] is not MibLeaf item)
                     {

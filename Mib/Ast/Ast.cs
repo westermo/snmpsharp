@@ -33,19 +33,19 @@ public static class SMIv2 {
         Between(Terms.Char('{'), inner, Terms.Char('}')).WithName("Block");
 
     // OidAssignment = "::=" "{" IDENT ( IDENT "(" <number> ")" )* <number> "}"
-    public static Parser<UnresolvedOid> OidAssignment(string context) =>
-        Terms.Text("::=").ElseError($"Expected '::=' in {context}")
-            .SkipAnd(Terms.Char('{').ElseError($"Expected '{{' after '::=' in {context}"))
-            .SkipAnd(Ident.ElseError($"Expected OID parent name in {context}"))
+    public static readonly Parser<UnresolvedOid> OidAssignment =
+        Terms.Text("::=").ElseError("Expected '::='")
+            .SkipAnd(Terms.Char('{').ElseError("Expected '{' after '::='"))
+            .SkipAnd(Ident.ElseError("Expected OID parent name"))
             .And(
                 Ident
-                .AndSkip(Terms.Char('(').ElseError($"Expected '(' after OID component name in {context}"))
-                .And(Terms.Integer().ElseError($"Expected OID number during {context}"))
-                .AndSkip(Terms.Char(')').ElseError($"Expected ')' after OID component number in {context}"))
+                .AndSkip(Terms.Char('(').ElseError("Expected '(' after OID component name"))
+                .And(Terms.Integer().ElseError("Expected OID number"))
+                .AndSkip(Terms.Char(')').ElseError("Expected ')' after OID component number"))
                 .ZeroOrMany()
             )
-            .And(Terms.Integer().ElseError($"Expected OID number during {context}"))
-            .AndSkip(Terms.Char('}').ElseError($"Expected '}}' in {context}"))
+            .And(Terms.Integer().ElseError("Expected OID number"))
+            .AndSkip(Terms.Char('}').ElseError("Expected '}'"))
             .Then(static x => new UnresolvedOid(x.Item1, x.Item2, x.Item3))
             .WithName("OidAssignment");
 
@@ -135,20 +135,13 @@ public enum SMIv2Status
 }
 public class ModuleDefinition(
     TextSpan identifier,
-    IReadOnlyList<TextSpan> exports,
     IReadOnlyList<Import> imports,
     IReadOnlyList<ModuleItem> items
 ) {
     public TextSpan Identifier { get; } = identifier;
-    public IReadOnlyList<TextSpan> Exports { get; } = exports;
     public IReadOnlyList<Import> Imports { get; } = imports;
     public IReadOnlyList<ModuleItem> Items { get; } = items;
 
-    // Exports = "EXPORTS" [SymbolList] ";"
-    public static readonly Parser<IReadOnlyList<TextSpan>> ExportsParser =
-        Terms.Keyword("EXPORTS")
-            .SkipAnd(Separated(Terms.Char(','), SMIv2.Ident))
-            .AndSkip(Terms.Char(';'));
 
     // ImportsSymbolsFromModule = Symbol ("," Symbol)* "FROM" ModuleIdentifier
     static readonly Parser<Import> ImportsSymbolsFromModule =
@@ -162,18 +155,22 @@ public class ModuleDefinition(
             .SkipAnd(ImportsSymbolsFromModule.ZeroOrMany())
             .AndSkip(Terms.Char(';').ElseError("Expected ';' after IMPORTS"));
 
+    // We don't implement EXPORTS as it's explicitly not allowed in SMIv2
+    // See section 3.3 "Exporting Symbols" of RFC 2578
+    // https://www.rfc-editor.org/rfc/rfc2578.html#section-3.3
+    //
     // Module     = IDENT "DEFINITIONS" "::=" "BEGIN" ModuleBody? "END"
-    // ModuleBody = Exports? Imports? ModuleItem*
+    // ModuleBody =  Exports? Imports? ModuleItem*
+    // Exports    = "EXPORTS" <raw> ";"
     public static Parser<ModuleDefinition> Module =
         SMIv2.Ident
             .AndSkip(Terms.Keyword("DEFINITIONS").ElseError("Expected 'DEFINITIONS' after module name"))
             .AndSkip(Terms.Text("::=").ElseError("Expected '::=' after DEFINITIONS"))
             .AndSkip(Terms.Keyword("BEGIN").ElseError("Expected 'BEGIN'"))
-            .And(ExportsParser.Optional().Then(static x => x.OrSome([])))
             .And(ImportsParser.Optional().Then(static x => x.OrSome([])))
             .And(ModuleItem.Parser.ZeroOrMany())
             .AndSkip(Terms.Keyword("END").ElseError("Expected 'END' or a valid top-level definition"))
-            .Then(static x => new ModuleDefinition(x.Item1, x.Item2, x.Item3, x.Item4))
+            .Then(static x => new ModuleDefinition(x.Item1, x.Item2, x.Item3))
             .WithName("ModuleDefinition");
 
     public static Parser<ModuleDefinition> EntryPoint = Module;
@@ -194,7 +191,7 @@ public abstract class ModuleItem
     //            | ModuleIdentity
     //            | NotificationType
     //            | ConceptualTable
-    //            | ConceptualRow
+    //            | ConceptualRow | AugmentingConceptualRow
     //            | LeafObject
     public static readonly Parser<ModuleItem> Parser =
         OneOf<ModuleItem>(
@@ -208,6 +205,7 @@ public abstract class ModuleItem
             ModuleIdentity.InnerParser,
             NotificationType.InnerParser,
             ConceptualTable.InnerParser,
+            AugmentingConceptualRow.InnerParser,
             ConceptualRow.InnerParser,
             LeafObject.InnerParser
         ).WithName("ModuleItem");
@@ -287,7 +285,7 @@ public class ObjectIdentifier(
         SMIv2.Ident
             .AndSkip(Terms.Keyword("OBJECT"))
             .AndSkip(Terms.Keyword("IDENTIFIER"))
-            .And(SMIv2.OidAssignment("OBJECT IDENTIFIER"))
+            .And(SMIv2.OidAssignment)
             .Then(static x => new ObjectIdentifier(x.Item1, x.Item2))
             .WithName("ObjectIdentifier");
 
@@ -303,7 +301,7 @@ public class ObjectIdentifier(
             .AndSkip(SMIv2.OTStatusPart)
             .AndSkip(SMIv2.OTDescriptionPart)
             .AndSkip(SMIv2.OTReferPart.ZeroOrOne())
-            .And(SMIv2.OidAssignment("OBJECT-IDENTITY"))
+            .And(SMIv2.OidAssignment)
             .Then(static x => new ObjectIdentifier(x.Item1, x.Item2))
             .WithName("ObjectIdentity");
 }
@@ -350,7 +348,7 @@ public class ModuleIdentity(
             .AndSkip(Terms.Keyword("DESCRIPTION").ElseError("Expected 'DESCRIPTION' in MODULE-IDENTITY"))
             .And(Terms.String().ElseError("Expected string after DESCRIPTION"))
             .And(Revision.ZeroOrMany())
-            .And(SMIv2.OidAssignment("MODULE-IDENTITY"))
+            .And(SMIv2.OidAssignment)
             .Then(static x => new ModuleIdentity(
                 x.Item1, x.Item7,
                 x.Item2, x.Item3, x.Item4, x.Item5, x.Item6))
@@ -385,7 +383,7 @@ public class NotificationType(
             .And(SMIv2.OTStatusPart)
             .AndSkip(SMIv2.OTDescriptionPart)
             .AndSkip(SMIv2.OTReferPart.ZeroOrOne())
-            .And(SMIv2.OidAssignment("NOTIFICATION-TYPE"))
+            .And(SMIv2.OidAssignment)
             .Then(static x => new NotificationType(
                 x.Item1, x.Item4, x.Item3, x.Item2))
             .WithName("NotificationType");
@@ -415,7 +413,7 @@ public class ConceptualTable(
             .AndSkip(Terms.Keyword("OF"))
             .And(Type.Parser.ElseError("Expected entry type after SEQUENCE OF"))
             .And(SMIv2.OTMiddlePart)
-            .And(SMIv2.OidAssignment("OBJECT-TYPE ConceptualTable"))
+            .And(SMIv2.OidAssignment)
             .Then(static x => new ConceptualTable(
                 x.Item1, x.Item4, x.Item2, x.Item3))
             .WithName("ConceptualTable");
@@ -423,7 +421,7 @@ public class ConceptualTable(
 
 // A "Conceptual Row" in 7.1.12 "Conceptual Tables" of RFC2578
 // https://www.rfc-editor.org/rfc/rfc2578.html#section-7.1.12
-// OBJECT-TYPE with SYNTAX <EntryType> and INDEX/AUGMENTS
+// OBJECT-TYPE with SYNTAX <EntryType> and INDEX clause
 public class ConceptualRow(
     TextSpan name,
     UnresolvedOid oid,
@@ -435,21 +433,15 @@ public class ConceptualRow(
     public SMIv2Status Status { get; } = status;
     public IReadOnlyList<TextSpan> Index { get; } = index;
 
-    // In official syntax `IndexPart` is can always be added to a `OBJECT-TYPE`
-    // macro and it comes after `ReferPart` but before `DefValPart`.
-    // Semantically however it must be present iff it's "Conceptual Row" so here
-    // we only add the syntax to "Conceptual Row"
     // See "7.7.  Mapping of the INDEX clause" of RFC2578
     // https://www.rfc-editor.org/rfc/rfc2578.html#section-7.7
-    //
-    // Note: "AUGMENTS" and "IMPLIED" is not implemented
-    // OTIndexPart = "INDEX"    "{" IndexTypes "}"
-    //             | "AUGMENTS" "{" Entry      "}"
+    // IMPLIEd path is not implemented
+    // 
+    // OTIndexPart = "INDEX" "{" OTIndexItems "}"
     // OTIndexItems = (IDENT ",")* "IMPLIED" IDENT
     //              | (IDENT ",")* IDENT
     public static readonly Parser<IReadOnlyList<TextSpan>> OTIndexPart =
-        Terms.Keyword("INDEX").Or(Terms.Keyword("AUGMENTS"))
-            .SkipAnd(SMIv2.Block(SMIv2.Idents));
+        Terms.Keyword("INDEX").SkipAnd(SMIv2.Block(SMIv2.Idents));
 
     //  ConceptualRow = "OBJECT-TYPE"
     //      "SYNTAX" <ident>
@@ -457,7 +449,7 @@ public class ConceptualRow(
     //      "STATUS" <ident>
     //      ("DESCRIPTION" <string>)?
     //      ("REFERENCE" <string>)?
-    //      ("INDEX" "{" ident, ... "}")?
+    //      "INDEX" "{" ident, ... "}"
     //      OidAssignment
     public static readonly Parser<ConceptualRow> InnerParser =
         SMIv2.Ident
@@ -465,10 +457,48 @@ public class ConceptualRow(
             .And(SMIv2.OTSyntaxPart)
             .And(SMIv2.OTMiddlePart)
             .And(OTIndexPart)
-            .And(SMIv2.OidAssignment("OBJECT-TYPE ConceptualRow"))
+            .And(SMIv2.OidAssignment)
             .Then(static x => new ConceptualRow(
                 x.Item1, x.Item5, x.Item2, x.Item3, x.Item4))
             .WithName("ConceptualRow");
+}
+
+// A "Conceptual Row Augmentation" in 7.8 "Mapping of the AUGMENTS clause" of RFC2578
+// https://www.rfc-editor.org/rfc/rfc2578.html#section-7.8
+// OBJECT-TYPE with SYNTAX <EntryType> and AUGMENTS clause
+public class AugmentingConceptualRow(
+    TextSpan name,
+    UnresolvedOid oid,
+    Type entryType,
+    SMIv2Status status,
+    TextSpan augments
+) : OidAssigner(name, oid) {
+    public Type EntryType { get; } = entryType;
+    public SMIv2Status Status { get; } = status;
+    public TextSpan Augments { get; } = augments;
+
+    // OTAugmentsPart = "AUGMENTS" "{" Entry "}"
+    public static readonly Parser<TextSpan> OTAugmentsPart =
+        Terms.Keyword("AUGMENTS").SkipAnd(SMIv2.Block(SMIv2.Ident));
+
+    //  AugmentingConceptualRow = "OBJECT-TYPE"
+    //      "SYNTAX" <ident>
+    //      "MAX-ACCESS" not-accessible
+    //      "STATUS" <ident>
+    //      ("DESCRIPTION" <string>)?
+    //      ("REFERENCE" <string>)?
+    //      "AUGMENTS" "{" entryTypeName "}"
+    //      OidAssignment
+    public static readonly Parser<AugmentingConceptualRow> InnerParser =
+        SMIv2.Ident
+            .AndSkip(Terms.Keyword("OBJECT-TYPE"))
+            .And(SMIv2.OTSyntaxPart)
+            .And(SMIv2.OTMiddlePart)
+            .And(OTAugmentsPart)
+            .And(SMIv2.OidAssignment)
+            .Then(static x => new AugmentingConceptualRow(
+                x.Item1, x.Item5, x.Item2, x.Item3, x.Item4))
+            .WithName("AugmentingConceptualRow");
 }
 
 // OBJECT-TYPE for leafs
@@ -499,7 +529,7 @@ public class LeafObject(
             .And(SMIv2.OTSyntaxPart)
             .And(SMIv2.OTMiddlePart)
             .AndSkip(OTDefValPart.ZeroOrOne())
-            .And(SMIv2.OidAssignment("OBJECT-TYPE leaf object"))
+            .And(SMIv2.OidAssignment)
             .Then(static x => new LeafObject(
                 x.Item1, x.Item4, x.Item2, x.Item3))
             .WithName("LeafObject");
