@@ -1,5 +1,6 @@
 
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 
 namespace SnmpSharpNet.Mib.SourceGenerator;
@@ -21,7 +22,7 @@ public static class Templating
 
             [global::Microsoft.CodeAnalysis.EmbeddedAttribute]
             [AttributeUsage(AttributeTargets.Class)]
-            public sealed class MibOidsAttribute(string module) : Attribute {}
+            public sealed class MibOidsAttribute(params string[] modules) : Attribute {}
         }
         #pragma warning restore CS9113
         """;
@@ -36,7 +37,7 @@ public static class Templating
         ];
     }
 
-    public static string[] DataFile(IEnumerable<(PartialClass, MibModule)> decls)
+    public static string[] DataFile(IEnumerable<(PartialClass, ImmutableArray<MibItem>)> decls)
     {
         return [
             $"#nullable enable",
@@ -49,31 +50,29 @@ public static class Templating
         ];
     }
 
-    public static string[] PartialClass(PartialClass decl, MibModule module)
+    public static string[] PartialClass(PartialClass decl, IEnumerable<MibItem> items)
     {
-        var tables = module.Items.Values.OfType<MibTable>();
-        var leafs = module.Items.Values.OfType<MibLeaf>();
         return decl.AsLiteral($": IOidGroup<{decl.TypeName}>", [
-            ..tables.SelectMany(x => TableEntry(decl.Accessibility, x)),
+            ..items.OfType<MibTable>().SelectMany(x => TableEntry(decl.Accessibility, x)),
             $"",
-            ..module.Items.Values.OfType<MibValuedItem>().SelectMany(OidField),
+            ..items.OfType<MibValuedItem>().SelectMany(OidField),
             $"",
-            ..module.Items.Values.OfType<MibValuedItem>().SelectMany(ValueField),
+            ..items.OfType<MibValuedItem>().SelectMany(ValueField),
             $"",
             $"",
             $"public static IEnumerable<Oid> SimpleOids {{ get; }} = [",
-            ..module.Items.Values.OfType<MibLeaf>().Select(
+            ..items.OfType<MibLeaf>().Select(
                 item => $"\t{item.Ident.Name}Oid,"
             ),
             $"];",
             $"",
             $"public static IEnumerable<Oid> BatchOids {{ get; }} = [",
-            ..module.Items.Values.OfType<MibTable>().Select(
+            ..items.OfType<MibTable>().Select(
                 item => $"\t{item.Ident.Name}Oid,"
             ),
             $"];",
             $"",
-            ..FromValues(decl.TypeName, module)
+            ..FromValues(decl.TypeName, items)
         ]);
     }
 
@@ -85,7 +84,7 @@ public static class Templating
             $"/// From SNMP Mib",
             $"/// {item.Ident}",
             $"/// </summary>",
-            $"public static readonly Oid {item.Ident.Name}Oid = {item.Ident.AsLiteral()};",
+            $"public static readonly Oid {item.Ident.Name}Oid = {item.Ident.ScalarInstance().AsLiteral()};",
         ];
     }
     public static string[] ValueField(MibValuedItem item)
@@ -109,75 +108,127 @@ public static class Templating
             $"{accessibility} class {table.EntryType()}",
             $"{{",
             $"\tpublic static readonly Oid TableRoot = {table.Ident.AsLiteral()};",
-            /*..table.Index.SelectMany((idx, i) => (string[])[
+            ..table.Index.SelectMany((idx, i) => (string[])[
                 $"",
                 ..DocComment($"Index #{i+1}"),
-                $"public required uint index{idx.Ident.Name};",
+                $"public required {idx.Type.AsUintType()} index{idx.Ident.Name};",
             ]).Indent(),
-            $"",*/
+            $"",
             /*$"",
             $"\tpublic required uint[] index;",
             $"",*/
             ..table.Columns.SelectMany((col, i) => (string[])[
                 $"",
                 ..DocComment($"Column #{i+1}"),
-                $"public AsnType {col.Ident.Name} = new NoSuchInstance();",
+                $"public required {col.Type.AsAsnType()} {col.Ident.Name};",
             ]).Indent(),
+            $"",
+            ..EntryFromValues(table).Indent(),
             $"",
             ..TableFromValues(table).Indent(),
             $"}}"
         ];
     }
 
+    public static string[] EntryFromValues(MibTable table)
+    {
+        var indexPart = table.Index.SelectMany((index, i) => {
+            if (index.Type.UintCount is null)
+            {
+                return (string[])[
+                    $"var index{index.Ident.Name} = ({index.Type.AsUintType()})index[1..(int)(1+index[0])].ToArray();",
+                    $"index = index[(int)index[0]..];"
+                ];
+            }
+            else if (index.Type.UintCount == 1)
+            {
+                return (string[])[
+                    $"var index{index.Ident.Name} = index[0];",
+                    $"index = index[1..];"
+                ];
+            }
+            else
+            {
+                return (string[])[
+                    $"var index{index.Ident.Name} = ({index.Type.AsUintType()})index[..(int){index.Type.UintCount}]).ToArray();",
+                    $"index = index[(int){index.Type.UintCount}..];"
+                ];
+            }
+        });
+
+
+
+        return [
+            $"public static {table.EntryType()}? EntryFromValues(ReadOnlySpan<uint> index, IReadOnlyDictionary<uint, AsnType> values)",
+            $"{{",
+            ..indexPart.Indent(),
+            $"",
+            ..table.Columns.SelectMany((col, i) => (string[])[
+                $"if(!values.TryGetValue({col.Ident.Oid.Last()}, out var _{col.Ident.Name})) {{ return null; }}",
+                $"if(_{col.Ident.Name} is not {col.Type.AsAsnType()} {col.Ident.Name}) {{ return null; }}",
+            ]).Indent(),
+            $"",
+            $"\treturn new {table.EntryType()}()",
+            $"\t{{",
+            ..table.Index.Select(x => $"\t\tindex{x.Ident.Name} = index{x.Ident.Name},"),
+            ..table.Columns.Select(x => $"\t\t{x.Ident.Name} = {x.Ident.Name},"),
+            $"\t}};",
+            $"}}"
+        ];
+    }
+
     public static string[] TableFromValues(MibTable table)
     {
-        var type = table.TableType();
         return [
-            $"public static {type} TableFromValues(IReadOnlyDictionary<Oid, AsnType> values)",
+            $"public static {table.TableType()} TableFromValues(IReadOnlyDictionary<Oid, AsnType> values)",
             $"{{",
             $"\t// The length of root + index nodes + column node;",
-            $"\tvar expectedLength = TableRoot.Length + {table.Index.Length} + 1;",
+            $"\tvar tableDepth = TableRoot.Length;",
+            $"\tvar expectedDepth = tableDepth + {table.Index.Sum(x => x.Type.UintCount ?? 1)} + 1;",
             $"\tvar relevantValues = values",
-            $"\t\t.Where(kv => kv.Key.Length >= expectedLength && TableRoot.IsRootOf(kv.Key));",
+            $"\t\t.Where(kv => kv.Key.Length >= expectedDepth && TableRoot.IsRootOf(kv.Key));",
             $"",
-            $"\tvar entries = new {type}();",
+            $"\tvar entries = new Dictionary<Oid, Dictionary<uint, AsnType>>();",
             $"",
-            $"\tforeach (var kv in values)",
+            $"\tforeach (var kv in relevantValues)",
             $"\t{{",
-            $"\t\tvar path = Oid.GetChildIdentifiers(TableRoot, kv.Key)!;",
-            $"\t\tvar index = new Oid(path[..^1]);",
+            $"\t\tvar path = kv.Key.ToArray();",
+            $"\t\tvar index = new Oid(path[TableRoot.Length..^1]);",
             $"\t\tif (!entries.ContainsKey(index))",
             $"\t\t{{",
-            $"\t\t\tentries.Add(index, new {table.EntryType()}());",
+            $"\t\t\tentries[index] = new();",
             $"\t\t}}",
-            $"\t\tvar entry = entries[index];",
-            $"",
+            //$"\t\tentries[index] ??= new();",
+            $"\t\tentries[index].Add(path[^1], kv.Value);",
+            /*$"",
             $"\t\tswitch (path[^1])",
             $"\t\t{{",
-            ..table.Columns.SelectMany((x, i) => (string[])[
-                $"\t\t\tcase {i+1}: entry.{x.Ident.Name} = kv.Value; break;"
+            ..table.Columns.SelectMany(x => (string[])[
+                $"\t\t\tcase {x.Ident.Oid[x.Ident.Oid.Length - 1]}: entry.{x.Ident.Name} = kv.Value; break;"
             ]),
             $"\t\t\tdefault: throw new NotImplementedException();",
-            $"\t\t}}",
+            $"\t\t}}",*/
             $"\t}}",
             $"",
-
-            $"\treturn entries;",
+            $"\treturn entries",
+            $"\t\t.Select(x => EntryFromValues((uint[])x.Key, x.Value))",
+            $"\t\t.OfType<{table.EntryType()}>()",
+            $"\t\t.ToArray();",
             $"}}"
         ];
     }
 
 
-    public static string[] FromValues(string type, MibModule module)
+    public static string[] FromValues(string type, IEnumerable<MibItem> items)
     {
         return [
             $"public static {type}? FromValues(IReadOnlyDictionary<Oid, AsnType> values)",
             $"{{",
             $"\tvar value = new {type}();",
-            ..module.Items.Values.OfType<MibLeaf>().Select(
+            ..items.OfType<MibLeaf>().Select(
                 x => $"\tif(values.TryGetValue({x.Ident.Name}Oid, out var _{x.Ident.Name})) {{ value.{x.Ident.Name} = _{x.Ident.Name}; }}"
             ),
-            ..module.Items.Values.OfType<MibTable>().Select(
+            ..items.OfType<MibTable>().Select(
                 x => $"\tvalue.{x.Ident.Name} = {x.Ident.Name}Entry.TableFromValues(values);"
             ),
             $"",

@@ -54,9 +54,9 @@ public static class SMIv2 {
     //
 
     // OTSyntaxPart = "SYNTAX" Type
-    public static readonly Parser<Type> OTSyntaxPart =
+    public static readonly Parser<AstType> OTSyntaxPart =
         Terms.Keyword("SYNTAX")
-            .SkipAnd(Type.Parser.ElseError("Expected type after SYNTAX"))
+            .SkipAnd(AstType.Parser.ElseError("Expected type after SYNTAX"))
             .WithName("OTSyntaxPart");
 
     // This is simply ignored
@@ -224,10 +224,10 @@ public abstract class OidAssigner(
 // OBJECT-TYPE with SYNTAX SEQUENCE OF <EntryType>
 public class EntryDef(
     TextSpan name,
-    IReadOnlyList<(TextSpan name, Type type)> fields
+    IReadOnlyList<(TextSpan name, AstType type)> fields
 ) : ModuleItem {
     public TextSpan Name { get; } = name;
-    public IReadOnlyList<(TextSpan name, Type type)> Fields { get; } = fields;
+    public IReadOnlyList<(TextSpan name, AstType type)> Fields { get; } = fields;
 
     //  EntryDef = IDENT "::=" "SEQUENCE" "{"
     //      (RowEntryItem ",")* RowEntryItem
@@ -238,7 +238,7 @@ public class EntryDef(
             .AndSkip(Terms.Text("::="))
             .AndSkip(Terms.Keyword("SEQUENCE"))
             .And(SMIv2.Block(
-                Separated(Terms.Char(','), SMIv2.Ident.And(Type.Parser))
+                Separated(Terms.Char(','), SMIv2.Ident.And(AstType.Parser))
             ))
             .Then(static x => new EntryDef(x.Item1, x.Item2))
             .WithName("EntryDef");
@@ -249,10 +249,10 @@ public class EntryDef(
 // See https://www.rfc-editor.org/rfc/rfc2579.html#section-3
 public class TextualConvention(
     TextSpan name,
-    Type syntax
+    AstType syntax
 ) : ModuleItem {
     public TextSpan Name { get; } = name;
-    public Type Syntax { get; } = syntax;
+    public AstType Syntax { get; } = syntax;
 
     //  TextualConvention = IDENT "::=" "TEXTUAL-CONVENTION"
     //       ("DISPLAY-HINT" <string>)?
@@ -395,10 +395,10 @@ public class NotificationType(
 public class ConceptualTable(
     TextSpan name,
     UnresolvedOid oid,
-    Type entryType,
+    AstType entryType,
     SMIv2Status status
 ) : OidAssigner(name, oid) {
-    public Type EntryType { get; } = entryType;
+    public AstType EntryType { get; } = entryType;
     public SMIv2Status Status { get; } = status;
 
     //  ConceptualTable = "OBJECT-TYPE"
@@ -411,7 +411,7 @@ public class ConceptualTable(
             .AndSkip(Terms.Keyword("SYNTAX"))
             .AndSkip(Terms.Keyword("SEQUENCE"))
             .AndSkip(Terms.Keyword("OF"))
-            .And(Type.Parser.ElseError("Expected entry type after SEQUENCE OF"))
+            .And(AstType.Parser.ElseError("Expected entry type after SEQUENCE OF"))
             .And(SMIv2.OTMiddlePart)
             .And(SMIv2.OidAssignment)
             .Then(static x => new ConceptualTable(
@@ -425,11 +425,11 @@ public class ConceptualTable(
 public class ConceptualRow(
     TextSpan name,
     UnresolvedOid oid,
-    Type entryType,
+    AstType entryType,
     SMIv2Status status,
     IReadOnlyList<TextSpan> index
 ) : OidAssigner(name, oid) {
-    public Type EntryType { get; } = entryType;
+    public AstType EntryType { get; } = entryType;
     public SMIv2Status Status { get; } = status;
     public IReadOnlyList<TextSpan> Index { get; } = index;
 
@@ -469,11 +469,11 @@ public class ConceptualRow(
 public class AugmentingConceptualRow(
     TextSpan name,
     UnresolvedOid oid,
-    Type entryType,
+    AstType entryType,
     SMIv2Status status,
     TextSpan augments
 ) : OidAssigner(name, oid) {
-    public Type EntryType { get; } = entryType;
+    public AstType EntryType { get; } = entryType;
     public SMIv2Status Status { get; } = status;
     public TextSpan Augments { get; } = augments;
 
@@ -505,10 +505,10 @@ public class AugmentingConceptualRow(
 public class LeafObject(
     TextSpan name,
     UnresolvedOid oid,
-    Type syntax,
+    AstType syntax,
     SMIv2Status status
 ) : OidAssigner(name, oid) {
-    public Type Syntax { get; } = syntax;
+    public AstType Syntax { get; } = syntax;
     public SMIv2Status Status { get; } = status;
 
     // This is simply ignored

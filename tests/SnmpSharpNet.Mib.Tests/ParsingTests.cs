@@ -1,6 +1,7 @@
 using Parlot;
 using Parlot.Fluent;
 using SnmpSharpNet.Mib.Ast;
+using System.Linq;
 
 namespace SnmpSharpNet.Mib.Tests;
 
@@ -212,6 +213,18 @@ public class ParsingTests
             Console.WriteLine("-----------------");
             Console.WriteLine(module);
         }
+    }
+
+    [Test]
+    public async Task TableColumns_CanBeSparse()
+    {
+        var module = MibParser.ParseModule(File.ReadAllText("MAU-MIB.mib"), "mib", BuiltinMib.All);
+        var table = module.Items.Values
+            .OfType<MibTable>()
+            .First(x => x.Ident.Name == "ifMauAutoNegTable");
+
+        await Assert.That(table.Columns.Any(x => x.Ident.Oid[^1] == 4)).IsTrue();
+        await Assert.That(table.Columns.Any(x => x.Ident.Oid[^1] == 3)).IsFalse();
     }
 
     [Test]

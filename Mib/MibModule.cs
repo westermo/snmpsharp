@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using Parlot;
 using SnmpSharpNet.Mib.Ast;
@@ -8,7 +9,7 @@ namespace SnmpSharpNet.Mib;
 
 public interface IMibThatExports
 {
-    public bool TryImport(string ident, out uint[]? oid, out string? syntax);
+    public bool TryImport(string ident, out uint[]? oid, out MibType? type);
 }
 
 public class MibModule : IMibThatExports
@@ -84,9 +85,87 @@ public class MibModule : IMibThatExports
         // Second pass:
         // Resolve all types
         // 
+        var localTypesByName = module.Items
+            .OfType<TextualConvention>()
+            .ToDictionary(x => x.Name.ToString(), x => x.Syntax);
+
+        var importedTypesByName = new Dictionary<string, MibType>();
+        foreach (var (symbols, fromModule) in module.Imports)
+        {
+            var importedModule = importables[fromModule.ToString()];
+            foreach (var symbol in symbols)
+            {
+                var symbolName = symbol.ToString();
+                if (importedTypesByName.ContainsKey(symbolName))
+                {
+                    continue;
+                }
+
+                if (importedModule.TryImport(symbolName, out _, out var importedType) && importedType is not null)
+                {
+                    importedTypesByName[symbolName] = importedType;
+                }
+            }
+        }
+
+        var typeResolutionStack = new HashSet<string>();
+        MibType ResolveType(AstType type)
+        {
+            if (type.Kind is { } kind)
+            {
+                return new MibType(
+                    kind,
+                    type.Refinement,
+                    type.Values?.ToDictionary(v => v.Item1.ToString(), v => checked((int)v.Item2)),
+                    type.Name?.ToString());
+            }
+
+            var typeName = type.Name?.ToString() ?? throw new Exception("Unresolved type missing name");
+            if (!typeResolutionStack.Add(typeName))
+            {
+                throw new Exception($"Type '{typeName}' is recursive");
+            }
+
+            try
+            {
+                MibType resolved;
+                if (localTypesByName.TryGetValue(typeName, out var localType))
+                {
+                    resolved = ResolveType(localType);
+                }
+                else if (importedTypesByName.TryGetValue(typeName, out var importedType))
+                {
+                    resolved = importedType;
+                }
+                else
+                {
+                    throw new Exception($"Type '{typeName}' is missing");
+                }
+
+                try
+                {
+                    return new MibType(
+                        resolved.Kind,
+                        type.Refinement is not null
+                            ? Refinement.Merge(resolved.Refinement, type.Refinement)
+                            : resolved.Refinement,
+                        resolved.Values,
+                        type.Name?.ToString());
+                }
+                catch (Exception e)
+                {
+                    throw new Exception($"When resolving '{typeName}' based on '{resolved}': {e.Message}");
+                }
+            }
+            finally
+            {
+                typeResolutionStack.Remove(typeName);
+            }
+        }
+
         typedefsByName = module.Items
             .OfType<TextualConvention>()
-            .ToDictionary(x => x.Name.ToString(), x => x.Syntax.ToString());
+            .ToDictionary(x => x.Name.ToString(), x => ResolveType(x.Syntax));
 
         var entryTypes = module.Items
             .OfType<EntryDef>()
@@ -105,7 +184,7 @@ public class MibModule : IMibThatExports
         foreach (var lo in module.Items.OfType<LeafObject>())
         {
             var oid = GetOid(lo.Name.ToString());
-            Items.Add(oid, new MibLeaf(oid, lo.Syntax.ToString()));
+            Items.Add(oid, new MibLeaf(oid, ResolveType(lo.Syntax)));
         }
 
         foreach (var table in module.Items.OfType<ConceptualTable>())
@@ -154,11 +233,12 @@ public class MibModule : IMibThatExports
                 });
 
             var columns = entryDef.Fields
-                .Select((a, i) => {
-                    var colOid = rowOid.Add((uint)(i + 1), null);
+                .Select(field => {
+                    var fieldName = field.name.ToString();
+                    var colOid = GetOid(fieldName);
                     if (!Items.TryGetValue(colOid, out var _col) || _col is not MibLeaf col)
                     {
-                        throw new Exception($"ConceptualTable({oid}): .1.{i + 1} is not a LeafObject");
+                        throw new Exception($"ConceptualTable({oid}): field '{field.name}' is not a LeafObject");
                     }
                     return col;
                 });
@@ -179,22 +259,28 @@ public class MibModule : IMibThatExports
     // IMibThatExports
     //
     private readonly Dictionary<string, MibItemIdent> oidByName = [];
-    private readonly Dictionary<string, string> typedefsByName = [];
+    private readonly Dictionary<string, MibType> typedefsByName = [];
 
-    public bool TryImport(string name, out uint[]? oid, out string? syntax)
+    public bool TryImport(string name, out uint[]? oid, out MibType? type)
     {
         oid = null;
-        syntax = null;
+        type = null;
         if (oidByName.TryGetValue(name, out var ident))
         {
             oid = ident.Oid;
             return true;
         }
-        if (typedefsByName.TryGetValue(name, out syntax))
+        if (typedefsByName.TryGetValue(name, out type))
         {
             return true;
         }
         return false;
+    }
+
+    public bool TryImportObject(string name, [MaybeNullWhen(false)] out MibItem item)
+    {
+        item = null;
+        return oidByName.TryGetValue(name, out var ident) && Items.TryGetValue(ident, out item);
     }
 
     public override string ToString()

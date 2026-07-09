@@ -24,7 +24,40 @@ static class Extensions
         }
         public string TableType()
         {
-            return $"Dictionary<Oid, {table.EntryType()}>";
+            return $"{table.EntryType()}[]";
+        }
+    }
+
+    extension(MibType type)
+    {
+        public string AsAsnType()
+        {
+            return type.Kind switch
+            {
+                TypeKind.Integer32Enum => "Integer32",
+                TypeKind.Integer32 => "Integer32",
+                TypeKind.Unsigned32 => "UInteger32",
+                TypeKind.OctetString => "OctetString",
+                TypeKind.IpAddress => "IpAddress",
+                TypeKind.ObjectIdentifier => "Oid",
+                TypeKind.Opaque => "Opaque",
+                TypeKind.Bits => "OctetString",
+                TypeKind.Counter32 => "Counter32",
+                TypeKind.Counter64 => "Counter64",
+                TypeKind.Gauge32 => "Gauge32",
+                TypeKind.TimeTicks => "TimeTicks",
+                _ => "AsnType"
+            };
+        }
+
+        public string AsUintType()
+        {
+            return type.UintCount switch
+            {
+                null => "uint[]",
+                1 => "uint",
+                _ => $"uint[{type.UintCount}]"
+            };
         }
     }
 

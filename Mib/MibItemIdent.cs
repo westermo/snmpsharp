@@ -35,6 +35,12 @@ public readonly struct MibItemIdent(uint[] oid, string?[] path)
         );
     }
 
+    public MibItemIdent ScalarInstance()
+    {
+        return Add(0, "<scalar>");
+    }
+
+
     public override bool Equals(object obj)
     {
         if (obj is not MibItemIdent other) { return false; }

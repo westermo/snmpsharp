@@ -37,7 +37,7 @@ public class MibTable(MibItemIdent ident, MibLeaf[] index, MibLeaf[] columns) : 
     public readonly MibLeaf[] Columns = columns;
 }
 
-public class MibLeaf(MibItemIdent ident, string type) : MibValuedItem(ident)
+public class MibLeaf(MibItemIdent ident, MibType type) : MibValuedItem(ident)
 {
-    public readonly string Type = type;
+    public readonly MibType Type = type;
 }

@@ -3,9 +3,8 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
-using System.Threading;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.Text;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace SnmpSharpNet.Mib.SourceGenerator;
 
@@ -22,47 +21,159 @@ public sealed class SnmpGenerator : IIncrementalGenerator
             i.AddSource("SnmpAttributes.Generated.cs", Templating.Attributes);
         });
 
-        var moduleNames = context.SyntaxProvider
-            .ForAttributeWithMetadataName(
-                "SnmpSharpNet.Mib.Attributes.MibModulesAttribute",
-                (node, ct) => true,
-                (c, ct) => c.Attributes.SelectMany(ParseMibModulesAttribute)
-            )
-            .SelectMany((x, ct) => x)
-            .Collect();
-
-        var mibFiles = context.AdditionalTextsProvider
+        var allMibs = context.AdditionalTextsProvider
             .Where(text => text.Path.EndsWith(".mib", StringComparison.OrdinalIgnoreCase))
+            .Select((text, ct) => {
+                var moduleName = Path.GetFileNameWithoutExtension(text.Path);
+                var module = ContextlessMibModule.TryFromAdditionalText(text, ct);
+                return (moduleName, module);
+            })
             .Collect();
 
-        var loadedModules = moduleNames.Combine(mibFiles)
-            .Select((x, ct) => LoadMibModules(x.Left, x.Right, ct));
+        var mibMods = allMibs
+            .Select((modules, ct) =>
+            {
+
+                var errors = modules
+                    .Where(x => !x.module.IsOk)
+                    .Select(x => x.module.Diagnostic)
+                    .ToList();
+
+                var parseds = modules
+                    .Where(x => x.module.IsOk)
+                    .ToDictionary(x => x.moduleName, x => x.module.Value);
+
+                var cache = new Dictionary<string, IMibThatExports>((Dictionary<string, IMibThatExports>)BuiltinMib.All);
+                var building = new HashSet<string>(StringComparer.Ordinal);
+
+                void buildModule(string key)
+                {
+                    if (cache.ContainsKey(key)) { return; }
+
+                    if (!building.Add(key))
+                    {
+                        errors.Add(Diagnostic.Create(
+                            Diagnostics.ParseAttributesError,
+                            Location.None,
+                            $"{key}: <Recursive module dependency detected>"));
+                        return;
+                    }
+
+                    if (!parseds.TryGetValue(key, out var parsed))
+                    {
+                        errors.Add(Diagnostic.Create(
+                            Diagnostics.MibNotFound,
+                            Location.None,
+                            key));
+                        building.Remove(key);
+                        return;
+                    }
+
+                    foreach (var (symbols, fromModule) in parsed.Module.Imports)
+                    {
+                        buildModule(fromModule.ToString());
+                    }
+
+                    try
+                    {
+                        cache[key] = new MibModule(parsed.Module, cache);
+                    }
+                    catch (Exception e)
+                    {
+                        errors.Add(Diagnostic.Create(
+                            Diagnostics.ParseAttributesError,
+                            Location.None,
+                            $"{key}: <{e.Message}>"));
+                    }
+                    finally
+                    {
+                        building.Remove(key);
+                    }
+                }
+
+                // Todo: Valued dictionary
+                var output = new Dictionary<string, MibModule>();
+                foreach (var moduleName in modules.Select(x => x.moduleName).Distinct(StringComparer.Ordinal))
+                {
+                    buildModule(moduleName);
+                    if (cache.TryGetValue(moduleName, out var mod) && mod is MibModule mibmod)
+                    {
+                        output[moduleName] = mibmod;
+                    }
+                }
+
+                return (output, errors.ToImmutableArray());
+            });
+
 
         var oidCarriers = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 "SnmpSharpNet.Mib.Attributes.MibOidsAttribute",
                 (node, ct) => true,
-                (c, ct) => c.Attributes.Select(x => ParseMibOidsAttribute(c.TargetSymbol, x))
+                (c, ct) => (PartialClass.FromSymbol(c.TargetSymbol), c.Attributes.SelectMany(ParseMibModulesAttribute).ToImmutableArray())
             )
-            .SelectMany((x, ct) => x)
             .Collect();
 
-        context.RegisterSourceOutput(oidCarriers.Combine(loadedModules), (ctx, x) =>
+        context.RegisterSourceOutput(mibMods.Combine(oidCarriers), (ctx, x) =>
         {
-            var unresolvedCarriers = x.Left.ReportAll(ctx).ToArray();
-            if (!x.Right.OrReport(ctx, out var loadedModules)) { return; }
+            foreach (var diag in x.Left.Item2)
+            {
+                ctx.ReportDiagnostic(diag);
+            }
+
+            var unresolvedCarriers = x.Right;
+            var mibMods = x.Left.output;
 
             if (unresolvedCarriers.Length <= 0) { return; }
- 
             var carriers = unresolvedCarriers
+                .Select(carrier => GetRelevantItems(carrier.Item2, mibMods).Select(items => (carrier.Item1, items)))
+                .ReportAll(ctx)
                 .Select(carrier => {
-                    return (carrier.decl, (MibModule)loadedModules[carrier.ModuleName]);
+                    return (carrier.Item1, carrier.items);
                 });
             
             ctx.AddSource("SnmpMibData.Generated.cs",
                 string.Join("\n", Templating.DataFile(carriers))
             );
         });
+    }
+
+    private static Result<ImmutableArray<MibItem>> GetRelevantItems(ImmutableArray<string> filters, Dictionary<string, MibModule> mibMods)
+    {
+        var items = new List<MibItem>();
+        foreach (var filter in filters)
+        {
+            var split = filter.Split(["::"], StringSplitOptions.None);
+            if (split.Length != 1 && split.Length != 2)
+            {
+                return Diagnostic.Create(
+                    Diagnostics.ParseAttributesError,
+                    Location.None,
+                    $"Module filter '{filter}' is invalid."
+                );
+            }
+
+            var moduleName = split[0];
+            if (!mibMods.TryGetValue(moduleName, out var module))
+            {
+                return Diagnostic.Create(Diagnostics.MibNotFound, Location.None, moduleName);
+            }
+
+            if (split.Length == 1)
+            {
+                items.AddRange(module.Items.Values);
+            }
+            else
+            {
+                if (!module.TryImportObject(split[1], out var item))
+                {
+                    return Diagnostic.Create(Diagnostics.MibNotFound, Location.None, moduleName);
+                }
+                items.Add(item);
+            }
+        }
+
+        return items.ToImmutableArray();
     }
 
     private static IEnumerable<string> ParseMibModulesAttribute(AttributeData x)
@@ -88,71 +199,5 @@ public sealed class SnmpGenerator : IIncrementalGenerator
             }
 
             return [];
-    }
-
-    private static Result<(PartialClass decl, string ModuleName)> ParseMibOidsAttribute(
-        ISymbol targetSymbol,
-        AttributeData attribute
-    ) {
-        if (attribute.ConstructorArguments.Length == 0)
-        {
-            return Diagnostic.Create(Diagnostics.ParseAttributesError, Location.None, "ParseMibOidsAttribute");
-        }
-
-        var arg = attribute.ConstructorArguments[0];
-        var maybeModuleName = arg.Value as string;
-
-        if (maybeModuleName is not string moduleName)
-        {
-            return Diagnostic.Create(Diagnostics.ParseAttributesError, Location.None, "ParseMibOidsAttribute");
-        }
-
-        return (PartialClass.FromSymbol(targetSymbol), moduleName);
-    }
-
-    static private Result<IReadOnlyDictionary<string, IMibThatExports>> LoadMibModules(
-        ImmutableArray<string> moduleNames,
-        ImmutableArray<AdditionalText> mibs,
-        CancellationToken ct
-    ) {
-        var modules = new Dictionary<string, IMibThatExports>((IDictionary<string, IMibThatExports>)BuiltinMib.All);
-
-        // Create mibsByName with deduplication (prefer source files over build output)
-        var mibsByName = new Dictionary<string, (string Path, SourceText? Text)>();
-        foreach (var mib in mibs)
-        {
-            var key = Path.GetFileNameWithoutExtension(mib.Path);
-            if (!mibsByName.ContainsKey(key))
-            {
-                mibsByName[key] = (mib.Path, mib.GetText(ct));
-            }
-        }
-
-        foreach (var moduleName in moduleNames.Distinct())
-        {
-            if (!mibsByName.TryGetValue(moduleName, out var mibInfo))
-            {
-                return Diagnostic.Create(Diagnostics.ParseError, Location.None, moduleName);
-            }
-            var (mibPath, mibContents) = mibInfo;
-
-            try
-            {
-                var mibText = mibContents?.ToString() ?? string.Empty;
-                var module = MibParser.ParseModule(mibText, mibPath, modules);
-                
-                // Only add if not already present (Parse may have added it via imports/includes)
-                if (!modules.ContainsKey(module.Identifier))
-                {
-                    modules[module.Identifier] = module;
-                }
-            }
-            catch (Exception e)
-            {
-                return Diagnostic.Create(Diagnostics.ParseAttributesError, Location.None, $"{mibPath}: <{e.Message}>");
-            }
-        }
-
-        return modules;
     }
 }
