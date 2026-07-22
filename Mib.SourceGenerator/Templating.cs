@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace SnmpSharpNet.Mib.SourceGenerator;
 
-using PartialClass = (string Accessibility, string? Namespace, string TypeName);
+using PartialClass = (string Accessibility, string? Namespace, string TypeName, Microsoft.CodeAnalysis.Location Location);
 
 public static class Templating
 {

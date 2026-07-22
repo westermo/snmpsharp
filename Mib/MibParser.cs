@@ -26,17 +26,19 @@ public static class MibParser {
         };
         context.OnExitParser += (parser, ctx) => parseStack.Pop();
         
-        ModuleDefinition.Module.Compile().TryParse(context, out var result, out var error);
-        if (error is not null)
+        ModuleDefinition.Module.Compile().TryParse(context, out var result, out var maybeError);
+        if (maybeError is {} error)
         {
-            throw new FormatException(
+            throw new ParseException(
                 $"""
-                Failed to parse MIB module '{moduleHint}' @ {error?.Position}
-                    Error: {error?.Message}
+                Failed to parse MIB module '{moduleHint}' @ {error!.Position}
+                    Error: {error!.Message}
                     Stack:
                         {string.Join(",        \n", parseStack)}
                     Next: {context.Scanner.Cursor.Span.Slice(0, 32).ToString().Replace("\n", "\\n")}
-                """);
+                """,
+                error.Position
+            );
         }
 
         return result;

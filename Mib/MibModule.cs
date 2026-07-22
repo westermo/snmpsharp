@@ -9,34 +9,51 @@ namespace SnmpSharpNet.Mib;
 
 public interface IMibThatExports
 {
-    public bool TryImport(string ident, out uint[]? oid, out MibType? type);
+    Dictionary<MibItemIdent, MibItem> Items { get; }
+    public bool TryImport(string ident, out MibItem? item, out MibType? type);
 }
 
 public class MibModule : IMibThatExports
 {
     public readonly string Identifier;
-    public readonly Dictionary<MibItemIdent, MibItem> Items = [];
+    public Dictionary<MibItemIdent, MibItem> Items { get; } = [];
 
     public MibModule(ModuleDefinition module, IReadOnlyDictionary<string, IMibThatExports> importables)
     {
         Identifier = module.Identifier.ToString();
 
-        var externalOids = MibItemIdent.TopLevelArcs.ToDictionary(x => x.Key, x => x.Value);
+        var importedItems = new Dictionary<string, MibItem>();
+        var importedTypes = new Dictionary<string, MibType>();
 
         // Add imported names to oidCache
         foreach (var (symbols, fromModule) in module.Imports)
         {
+            if (!importables.TryGetValue(fromModule.ToString(), out var importedModules))
+            {
+                throw new Exception($"Failed to import '{fromModule}', no such importable");
+            }
             var importedModule = importables[fromModule.ToString()];
             foreach (var symbol in symbols)
             {
-                if (importedModule.TryImport(symbol.ToString(), out var oid, out _) && oid != null)
+                var symbolName = symbol.ToString();
+                if (!importedModule.TryImport(symbolName, out var item, out var importedType))
                 {
-                    externalOids.Add(
-                        symbol.ToString(),
-                        new MibItemIdent(oid, [$"<{fromModule}>", symbol.ToString()])
-                    );
+                    continue; // compliance/group names may not be resolvable
+                }
+                if (item is not null)
+                {
+                    importedItems[symbolName] = item;
+                }
+                if (importedType is not null)
+                {
+                    importedTypes[symbolName] = importedType;
                 }
             }
+        }
+
+        var externalOids = MibItemIdent.TopLevelArcs.ToDictionary(x => x.Key, x => x.Value);
+        foreach (var item in importedItems) {
+            externalOids.Add(item.Key, item.Value.Ident);
         }
 
         //
@@ -89,25 +106,6 @@ public class MibModule : IMibThatExports
             .OfType<TextualConvention>()
             .ToDictionary(x => x.Name.ToString(), x => x.Syntax);
 
-        var importedTypesByName = new Dictionary<string, MibType>();
-        foreach (var (symbols, fromModule) in module.Imports)
-        {
-            var importedModule = importables[fromModule.ToString()];
-            foreach (var symbol in symbols)
-            {
-                var symbolName = symbol.ToString();
-                if (importedTypesByName.ContainsKey(symbolName))
-                {
-                    continue;
-                }
-
-                if (importedModule.TryImport(symbolName, out _, out var importedType) && importedType is not null)
-                {
-                    importedTypesByName[symbolName] = importedType;
-                }
-            }
-        }
-
         var typeResolutionStack = new HashSet<string>();
         MibType ResolveType(AstType type)
         {
@@ -116,7 +114,7 @@ public class MibModule : IMibThatExports
                 return new MibType(
                     kind,
                     type.Refinement,
-                    type.Values?.ToDictionary(v => v.Item1.ToString(), v => checked((int)v.Item2)),
+                    type.Values?.ToDictionary(v => v.Item1.ToString(), v => v.Item2),
                     type.Name?.ToString());
             }
 
@@ -133,7 +131,7 @@ public class MibModule : IMibThatExports
                 {
                     resolved = ResolveType(localType);
                 }
-                else if (importedTypesByName.TryGetValue(typeName, out var importedType))
+                else if (importedTypes.TryGetValue(typeName, out var importedType))
                 {
                     resolved = importedType;
                 }
@@ -202,7 +200,8 @@ public class MibModule : IMibThatExports
                 throw new Exception($"ConceptualTable({oid}): No item at .1");
             }
 
-            IReadOnlyList<TextSpan> rowIndex;
+            IReadOnlyList<TextSpan>? rowIndex = null;
+            MibLeaf[]? augmentsIndex = null;
             if (rowAssigner is ConceptualRow row)
             {
                 if (table.EntryType.ToString() != row.EntryType.ToString() || table.Status != row.Status)
@@ -214,23 +213,46 @@ public class MibModule : IMibThatExports
                 if (table.EntryType.ToString() != augRow.EntryType.ToString() || table.Status != augRow.Status)
                     throw new Exception($"ConceptualTable({oid}) doesn't match AugmentingConceptualRow");
                 var baseRowName = augRow.Augments.ToString();
-                if (!assignersByName.TryGetValue(baseRowName, out var _baseRow) || _baseRow is not ConceptualRow baseRow)
-                    throw new Exception($"ConceptualTable({oid}): AUGMENTS base row '{baseRowName}' not found in this module");
-                rowIndex = baseRow.Index;
+                if (assignersByName.TryGetValue(baseRowName, out var _baseRow) && _baseRow is ConceptualRow baseRow)
+                {
+                    rowIndex = baseRow.Index;
+                }
+                else if (importedItems.TryGetValue(baseRowName, out var importedRow) && importedRow is MibTable importedTable)
+                {
+                    rowIndex = null;
+                    augmentsIndex = importedTable.Index;
+                }
+                else
+                {
+                    throw new Exception($"ConceptualTable({oid}): AUGMENTS base row '{baseRowName}' not found");
+                }
             }
             else
             {
                 throw new Exception($"ConceptualTable({oid}): .1 is not a ConceptualRow or AugmentingConceptualRow");
             }
 
-            var index = rowIndex
-                .Select((name, idx) => {
-                    if (Items[GetOid(name.ToString())] is not MibLeaf item)
-                    {
+            MibLeaf[] index;
+            if (augmentsIndex is not null)
+            {
+                index = augmentsIndex;
+            }
+            else
+            {
+                index = rowIndex!
+                    .Select((name, idx) => {
+                        if (Items.TryGetValue(GetOid(name.ToString()), out var _item) && _item is MibLeaf item)
+                        {
+                            return item;
+                        }
+                        if (importedItems.TryGetValue(name.ToString(), out _item) && _item is MibLeaf imported)
+                        {
+                            return imported;
+                        }
                         throw new Exception($"ConceptualTable({oid}): INDEX '{name}' is not a LeafObject");
-                    }
-                    return item;
-                });
+                    })
+                    .ToArray();
+            }
 
             var columns = entryDef.Fields
                 .Select(field => {
@@ -243,6 +265,12 @@ public class MibModule : IMibThatExports
                     return col;
                 });
             Items.Add(oid, new MibTable(oid, [..index], [..columns]));
+        }
+
+        // Snapshot all items before removing columns, so TryImport can still find them
+        foreach (var kvp in Items)
+        {
+            allItems[kvp.Key] = kvp.Value;
         }
 
         foreach (var table in module.Items.OfType<ConceptualTable>())
@@ -260,21 +288,32 @@ public class MibModule : IMibThatExports
     //
     private readonly Dictionary<string, MibItemIdent> oidByName = [];
     private readonly Dictionary<string, MibType> typedefsByName = [];
+    private readonly Dictionary<MibItemIdent, MibItem> allItems = [];
 
-    public bool TryImport(string name, out uint[]? oid, out MibType? type)
+    public bool TryImport(string name, out MibItem? item, out MibType? type)
     {
-        oid = null;
+        item = null;
         type = null;
-        if (oidByName.TryGetValue(name, out var ident))
+        var valued = oidByName.TryGetValue(name, out var ident);
+        if (valued && !allItems.TryGetValue(ident, out item))
         {
-            oid = ident.Oid;
-            return true;
+            // Row entries (ConceptualRow) aren't in Items, but their parent table is at oid minus last arc
+            var parentOid = new uint[ident.Oid.Length - 1];
+            Array.Copy(ident.Oid, parentOid, parentOid.Length);
+            var parentNames = new string?[ident.OidNames.Length - 1];
+            Array.Copy(ident.OidNames, parentNames, parentNames.Length);
+            var parentIdent = new MibItemIdent(parentOid, parentNames);
+            if (allItems.TryGetValue(parentIdent, out var parent) && parent is MibTable)
+            {
+                item = parent;
+            }
+            else
+            {
+                item = new MibItem(ident);
+            }
         }
-        if (typedefsByName.TryGetValue(name, out type))
-        {
-            return true;
-        }
-        return false;
+        var typed = typedefsByName.TryGetValue(name, out type);
+        return valued || typed;
     }
 
     public bool TryImportObject(string name, [MaybeNullWhen(false)] out MibItem item)

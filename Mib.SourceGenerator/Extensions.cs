@@ -4,7 +4,7 @@ using Microsoft.CodeAnalysis;
 
 namespace SnmpSharpNet.Mib.SourceGenerator;
 
-using PartialClass = (string Accessibility, string? Namespace, string TypeName);
+using PartialClass = (string Accessibility, string? Namespace, string TypeName, Location Location);
 
 static class Extensions
 {    
@@ -79,7 +79,7 @@ static class Extensions
                 symbol.ContainingNamespace.IsGlobalNamespace
                     ? null
                     : symbol.ContainingNamespace.ToDisplayString();
-            return (accessibility, ns, symbol.Name);
+            return (accessibility, ns, symbol.Name, symbol.Locations.First());
         }
         public string[] AsLiteral(string impls, IEnumerable<string> body)
         {

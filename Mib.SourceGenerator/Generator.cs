@@ -5,10 +5,11 @@ using System.IO;
 using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Text;
 
 namespace SnmpSharpNet.Mib.SourceGenerator;
 
-using PartialClass = (string Accessibility, string? Namespace, string TypeName);
+using PartialClass = (string Accessibility, string? Namespace, string TypeName, Location location);
 
 [Generator]
 public sealed class SnmpGenerator : IIncrementalGenerator
@@ -26,7 +27,8 @@ public sealed class SnmpGenerator : IIncrementalGenerator
             .Select((text, ct) => {
                 var moduleName = Path.GetFileNameWithoutExtension(text.Path);
                 var module = ContextlessMibModule.TryFromAdditionalText(text, ct);
-                return (moduleName, module);
+                var location = Location.Create(text.Path, new TextSpan(), new LinePositionSpan());
+                return (moduleName, module, location);
             })
             .Collect();
 
@@ -46,7 +48,7 @@ public sealed class SnmpGenerator : IIncrementalGenerator
                 var cache = new Dictionary<string, IMibThatExports>((Dictionary<string, IMibThatExports>)BuiltinMib.All);
                 var building = new HashSet<string>(StringComparer.Ordinal);
 
-                void buildModule(string key)
+                void buildModule(string key, Location location)
                 {
                     if (cache.ContainsKey(key)) { return; }
 
@@ -54,8 +56,9 @@ public sealed class SnmpGenerator : IIncrementalGenerator
                     {
                         errors.Add(Diagnostic.Create(
                             Diagnostics.ParseAttributesError,
-                            Location.None,
-                            $"{key}: <Recursive module dependency detected>"));
+                            location,
+                            $"{key}: <Recursive module dependency detected>"
+                        ));
                         return;
                     }
 
@@ -63,15 +66,16 @@ public sealed class SnmpGenerator : IIncrementalGenerator
                     {
                         errors.Add(Diagnostic.Create(
                             Diagnostics.MibNotFound,
-                            Location.None,
-                            key));
+                            location,
+                            $"{key}: Missing dependency"
+                        ));
                         building.Remove(key);
                         return;
                     }
 
                     foreach (var (symbols, fromModule) in parsed.Module.Imports)
                     {
-                        buildModule(fromModule.ToString());
+                        buildModule(fromModule.ToString(), location);
                     }
 
                     try
@@ -82,7 +86,7 @@ public sealed class SnmpGenerator : IIncrementalGenerator
                     {
                         errors.Add(Diagnostic.Create(
                             Diagnostics.ParseAttributesError,
-                            Location.None,
+                            location,
                             $"{key}: <{e.Message}>"));
                     }
                     finally
@@ -95,7 +99,7 @@ public sealed class SnmpGenerator : IIncrementalGenerator
                 var output = new Dictionary<string, MibModule>();
                 foreach (var moduleName in modules.Select(x => x.moduleName).Distinct(StringComparer.Ordinal))
                 {
-                    buildModule(moduleName);
+                    buildModule(moduleName, modules.First(x => x.moduleName == moduleName).location);
                     if (cache.TryGetValue(moduleName, out var mod) && mod is MibModule mibmod)
                     {
                         output[moduleName] = mibmod;
@@ -126,7 +130,7 @@ public sealed class SnmpGenerator : IIncrementalGenerator
 
             if (unresolvedCarriers.Length <= 0) { return; }
             var carriers = unresolvedCarriers
-                .Select(carrier => GetRelevantItems(carrier.Item2, mibMods).Select(items => (carrier.Item1, items)))
+                .Select(carrier => GetRelevantItems(carrier.Item1.Location, carrier.Item2, mibMods).Select(items => (carrier.Item1, items)))
                 .ReportAll(ctx)
                 .Select(carrier => {
                     return (carrier.Item1, carrier.items);
@@ -138,7 +142,7 @@ public sealed class SnmpGenerator : IIncrementalGenerator
         });
     }
 
-    private static Result<ImmutableArray<MibItem>> GetRelevantItems(ImmutableArray<string> filters, Dictionary<string, MibModule> mibMods)
+    private static Result<ImmutableArray<MibItem>> GetRelevantItems(Location location, ImmutableArray<string> filters, Dictionary<string, MibModule> mibMods)
     {
         var items = new List<MibItem>();
         foreach (var filter in filters)
@@ -148,7 +152,7 @@ public sealed class SnmpGenerator : IIncrementalGenerator
             {
                 return Diagnostic.Create(
                     Diagnostics.ParseAttributesError,
-                    Location.None,
+                    location,
                     $"Module filter '{filter}' is invalid."
                 );
             }
@@ -156,7 +160,7 @@ public sealed class SnmpGenerator : IIncrementalGenerator
             var moduleName = split[0];
             if (!mibMods.TryGetValue(moduleName, out var module))
             {
-                return Diagnostic.Create(Diagnostics.MibNotFound, Location.None, moduleName);
+                return Diagnostic.Create(Diagnostics.MibNotFound, location, moduleName);
             }
 
             if (split.Length == 1)
@@ -167,7 +171,7 @@ public sealed class SnmpGenerator : IIncrementalGenerator
             {
                 if (!module.TryImportObject(split[1], out var item))
                 {
-                    return Diagnostic.Create(Diagnostics.MibNotFound, Location.None, moduleName);
+                    return Diagnostic.Create(Diagnostics.MibNotFound, location, moduleName);
                 }
                 items.Add(item);
             }

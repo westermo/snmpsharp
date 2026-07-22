@@ -1,38 +1,71 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace SnmpSharpNet.Mib;
 
-public class BuiltinMib(
-    Dictionary<string, uint[]> oids,
-    Dictionary<string, MibType> types,
-    HashSet<string> keywords) : IMibThatExports
+public class BuiltinMib : IMibThatExports
 {
-    public bool TryImport(string ident, out uint[]? oid, out MibType? type)
+    public Dictionary<MibItemIdent, MibItem> Items { get; } = [];
+    public readonly string Name;
+    public readonly Dictionary<string, MibType> Types;
+
+    private readonly Dictionary<string, MibItemIdent> oidByName = [];
+    private readonly HashSet<string> keywords;
+
+    public BuiltinMib(
+        string name,
+        Dictionary<string, uint[]> oids,
+        Dictionary<string, MibType> types,
+        HashSet<string> keywords,
+        Dictionary<string, (uint[], MibType)>? leaves = null)
     {
-        if (oids.TryGetValue(ident, out oid))
+        Name = name;
+        Types = types;
+        this.keywords = keywords;
+
+        foreach (var kvp in oids)
         {
-            type = null;
+            var ident = new MibItemIdent(kvp.Value, [$"<{name}>", kvp.Key]);
+            oidByName[kvp.Key] = ident;
+            Items[ident] = new MibItem(ident);
+        }
+
+        if (leaves is not null)
+        {
+            foreach (var kvp in leaves)
+            {
+                var oid = kvp.Value.Item1;
+                var ident = new MibItemIdent(oid, [$"<{name}>", kvp.Key]);
+                oidByName[kvp.Key] = ident;
+                Items[ident] = new MibLeaf(ident, kvp.Value.Item2);
+            }
+        }
+    }
+
+    public bool TryImport(string ident, out MibItem? item, out MibType? type)
+    {
+        item = null;
+        type = null;
+        if (oidByName.TryGetValue(ident, out var itemIdent))
+        {
+            item = Items[itemIdent];
             return true;
         }
-        if (types.TryGetValue(ident, out type))
+        if (Types.TryGetValue(ident, out type))
         {
-            oid = null;
             return true;
         }
         if (keywords.Contains(ident))
         {
-            oid = null;
-             type = null;
             return true;
         }
-        oid = null;
-        type = null;
         return false;
     }
 
     // RFC 2578 - SNMPv2-SMI
     public static readonly BuiltinMib SNMPv2SMI = new(
+        "SNMPv2-SMI",
         new Dictionary<string, uint[]>
         {
             ["org"] = [1, 3],
@@ -50,6 +83,7 @@ public class BuiltinMib(
             ["snmpDomains"] = [1, 3, 6, 1, 6, 1],
             ["snmpProxys"] = [1, 3, 6, 1, 6, 2],
             ["snmpModules"] = [1, 3, 6, 1, 6, 3],
+            ["zeroDotZero"] = [0, 0],
         },
         new Dictionary<string, MibType>
         {
@@ -73,6 +107,7 @@ public class BuiltinMib(
 
     // RFC 2580 - SNMPv2-CONF
     public static readonly BuiltinMib SNMPv2CONF = new(
+        "SNMPv2-CONF",
         [],
         [],
         [
@@ -84,6 +119,7 @@ public class BuiltinMib(
 
     // RFC 3418 - SNMPv2-MIB
     public static readonly BuiltinMib SNMPv2MIB = new(
+        "SNMPv2-MIB",
         new Dictionary<string, uint[]>
         {
             ["snmpMIB"] = [1, 3, 6, 1, 6, 3, 1],
@@ -96,6 +132,7 @@ public class BuiltinMib(
 
     // RFC 2579 - SNMPv2-TC
     public static readonly BuiltinMib SNMPv2TC = new(
+        "SNMPv2-TC",
         [],
         new Dictionary<string, MibType>
         {
@@ -136,6 +173,7 @@ public class BuiltinMib(
     // RFC 2021 - RMON2-MIB
     // This one IMPORTS stuff from the SNMPv1 era. Let's avoid that.
     public static readonly BuiltinMib RMON2MIB = new(
+        "RMON2-MIB",
         new Dictionary<string, uint[]>
         {
             ["rmon"] = [1, 3, 6, 1, 4, 1, 9, 9, 16],
