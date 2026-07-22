@@ -6,10 +6,10 @@ namespace SnmpSharpNet.Mib;
 
 public class Refinement
 {
-    public IReadOnlyList<(int Min, int Max)> Contraints { get; }
+    public IReadOnlyList<(long Min, long Max)> Contraints { get; }
     public bool IsSize { get; }
 
-    public Refinement(IReadOnlyList<(int Min, int Max)> contraints, bool isSize = false)
+    public Refinement(IReadOnlyList<(long Min, long Max)> contraints, bool isSize = false)
     {
         var normalized = contraints
             .OrderBy(x => x.Min)
@@ -70,12 +70,12 @@ public enum TypeKind
 public class MibType(
     TypeKind kind,
     Refinement? refinement = null,
-    IReadOnlyDictionary<string, int>? values = null,
+    IReadOnlyDictionary<string, long>? values = null,
     string? name = null
 ) {
     public TypeKind Kind { get; } = kind;
     public Refinement? Refinement { get; } = refinement;
-    public IReadOnlyDictionary<string, int>? Values { get; } = values;
+    public IReadOnlyDictionary<string, long>? Values { get; } = values;
     public string? Name { get; } = name;
 
     public static MibType FromAst(SnmpSharpNet.Mib.Ast.AstType type)
@@ -83,7 +83,7 @@ public class MibType(
         return new MibType(
             type.Kind ?? throw new ArgumentException($"Type '{type}' is unresolved", nameof(type)),
             type.Refinement,
-            type.Values?.ToDictionary(v => v.Item1.ToString(), v => checked((int)v.Item2)),
+            type.Values?.ToDictionary(v => v.Item1.ToString(), v => v.Item2),
             type.Name?.ToString());
     }
 
@@ -98,9 +98,9 @@ public class MibType(
         }
 
         var values = Values is null
-            ? new Dictionary<string, int>()
+            ? new Dictionary<string, long>()
             : Values.ToDictionary(kv => kv.Key, kv => kv.Value);
-        values[name] = checked((int)value);
+        values[name] = value;
 
         return new MibType(TypeKind.Integer32Enum, values: values);
     }
@@ -159,7 +159,7 @@ public class MibType(
         }
 
         var next = new SnmpSharpNet.Mib.Refinement([
-            (checked((int)min), checked((int)max))
+            (min, max)
         ], isSize);
         var merged = SnmpSharpNet.Mib.Refinement.Merge(current, next);
         return new MibType(Kind, merged, Values, Name);

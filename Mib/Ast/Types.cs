@@ -22,13 +22,13 @@ public class AstType(
     // Based on https://www.rfc-editor.org/rfc/rfc2578.html#section-11.1
     // TypeRefinementValue = "(" Range ( "|" Range )* ")"
     // Range = <number> | <number> ".." <number>
-    static readonly Parser<(int Min, int Max)> _range =
+    static readonly Parser<(long Min, long Max)> _range =
         Terms.Integer()
             .And(Terms.Text("..").SkipAnd(Terms.Integer()).Optional())
             .Then(x => {
                 var min = x.Item1;
                 var max = x.Item2.OrSome(x.Item1);
-                return (checked((int)min), checked((int)max));
+                return (min, max);
             });
     public static readonly Parser<Refinement> TypeRefinementValue =
         Terms.Char('(')
