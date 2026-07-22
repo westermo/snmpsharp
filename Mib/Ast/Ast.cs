@@ -21,6 +21,13 @@ public static class SMIv2 {
             Literals.Comments("--")
         ).ZeroOrMany());
 
+    // ASN.1 string: everything between double quotes, no escape handling
+    public static readonly Parser<TextSpan> String =
+        SkipWhiteSpace(
+            Literals.Char('"')
+                .SkipAnd(AnyCharBefore(Literals.Char('"'), canBeEmpty: true, consumeDelimiter: true))
+        );
+
     // IDENT = [a-zA-Z][a-zA-Z0-9-_]*
     public static readonly Parser<TextSpan> Ident =
         Terms.Identifier(extraPart: c => c == '-' || c == '_').WithName("Ident");
@@ -32,11 +39,15 @@ public static class SMIv2 {
     public static Parser<T> Block<T>(Parser<T> inner) =>
         Between(Terms.Char('{'), inner, Terms.Char('}')).WithName("Block");
 
-    // OidAssignment = "::=" "{" IDENT ( IDENT "(" <number> ")" )* <number> "}"
+    // OidAssignment = "::=" "{" IDENT ("(" <number> ")")? ( IDENT "(" <number> ")" )* <number> "}"
     public static readonly Parser<UnresolvedOid> OidAssignment =
         Terms.Text("::=").ElseError("Expected '::='")
             .SkipAnd(Terms.Char('{').ElseError("Expected '{' after '::='"))
             .SkipAnd(Ident.ElseError("Expected OID parent name"))
+            .AndSkip(
+                // Skip optional (number) on the parent ident (e.g. iso(1))
+                Terms.Char('(').SkipAnd(Terms.Integer()).AndSkip(Terms.Char(')')).Optional()
+            )
             .And(
                 Ident
                 .AndSkip(Terms.Char('(').ElseError("Expected '(' after OID component name"))
@@ -82,21 +93,21 @@ public static class SMIv2 {
     // OTDescriptionPart = "DESCRIPTION" <string>
     public static readonly Parser<TextSpan> OTDescriptionPart =
         Terms.Keyword("DESCRIPTION")
-            .SkipAnd(Terms.String().ElseError("Expected string after DESCRIPTION"))
+            .SkipAnd(SMIv2.String.ElseError("Expected string after DESCRIPTION"))
             .WithName("OTDescriptionPart");
 
     // This is simply ignored
     // OTReferPart = "REFERENCE" <string>
     public static readonly Parser<TextSpan> OTReferPart =
         Terms.Keyword("REFERENCE")
-            .SkipAnd(Terms.String().ElseError("Expected string after REFERENCE"))
+            .SkipAnd(SMIv2.String.ElseError("Expected string after REFERENCE"))
             .WithName("OTReferPart");
 
     // This is simply ignored
     // OTUnitsPart = "UNITS" <string>
     public static readonly Parser<TextSpan> OTUnitsPart =
         Terms.Keyword("UNITS")
-            .SkipAnd(Terms.String().ElseError("Expected string after UNITS"))
+            .SkipAnd(SMIv2.String.ElseError("Expected string after UNITS"))
             .WithName("OTUnitsPart");
 
     // Note: Currently we only return status
@@ -264,7 +275,7 @@ public class TextualConvention(
         SMIv2.Ident
             .AndSkip(Terms.Text("::="))
             .AndSkip(Terms.Keyword("TEXTUAL-CONVENTION"))
-            .AndSkip(Terms.Keyword("DISPLAY-HINT").AndSkip(Terms.String()).ZeroOrOne())
+            .AndSkip(Terms.Keyword("DISPLAY-HINT").AndSkip(SMIv2.String).ZeroOrOne())
             .AndSkip(SMIv2.OTStatusPart)
             .AndSkip(SMIv2.OTDescriptionPart)
             .AndSkip(SMIv2.OTReferPart.ZeroOrOne())
@@ -325,9 +336,9 @@ public class ModuleIdentity(
     // Revision = "REVISION" <string> "DESCRIPTION" <string>
     static readonly Parser<(TextSpan, TextSpan)> Revision =
         Terms.Keyword("REVISION")
-            .SkipAnd(Terms.String())
+            .SkipAnd(SMIv2.String)
             .AndSkip(Terms.Keyword("DESCRIPTION"))
-            .And(Terms.String());
+            .And(SMIv2.String);
 
     //  ModuleIdentity = "MODULE-IDENTITY"
     //      "LAST-UPDATED" <string>
@@ -340,13 +351,13 @@ public class ModuleIdentity(
         SMIv2.Ident
             .AndSkip(Terms.Keyword("MODULE-IDENTITY"))
             .AndSkip(Terms.Keyword("LAST-UPDATED").ElseError("Expected 'LAST-UPDATED' in MODULE-IDENTITY"))
-            .And(Terms.String().ElseError("Expected date string after LAST-UPDATED"))
+            .And(SMIv2.String.ElseError("Expected date string after LAST-UPDATED"))
             .AndSkip(Terms.Keyword("ORGANIZATION").ElseError("Expected 'ORGANIZATION' in MODULE-IDENTITY"))
-            .And(Terms.String().ElseError("Expected string after ORGANIZATION"))
+            .And(SMIv2.String.ElseError("Expected string after ORGANIZATION"))
             .AndSkip(Terms.Keyword("CONTACT-INFO").ElseError("Expected 'CONTACT-INFO' in MODULE-IDENTITY"))
-            .And(Terms.String().ElseError("Expected string after CONTACT-INFO"))
+            .And(SMIv2.String.ElseError("Expected string after CONTACT-INFO"))
             .AndSkip(Terms.Keyword("DESCRIPTION").ElseError("Expected 'DESCRIPTION' in MODULE-IDENTITY"))
-            .And(Terms.String().ElseError("Expected string after DESCRIPTION"))
+            .And(SMIv2.String.ElseError("Expected string after DESCRIPTION"))
             .And(Revision.ZeroOrMany())
             .And(SMIv2.OidAssignment)
             .Then(static x => new ModuleIdentity(
@@ -433,15 +444,17 @@ public class ConceptualRow(
     public SMIv2Status Status { get; } = status;
     public IReadOnlyList<TextSpan> Index { get; } = index;
 
+    //
+    // XXX/TODO: `IMPLIED` is simply ignored.
+    //
     // See "7.7.  Mapping of the INDEX clause" of RFC2578
     // https://www.rfc-editor.org/rfc/rfc2578.html#section-7.7
-    // IMPLIEd path is not implemented
-    // 
     // OTIndexPart = "INDEX" "{" OTIndexItems "}"
     // OTIndexItems = (IDENT ",")* "IMPLIED" IDENT
     //              | (IDENT ",")* IDENT
     public static readonly Parser<IReadOnlyList<TextSpan>> OTIndexPart =
-        Terms.Keyword("INDEX").SkipAnd(SMIv2.Block(SMIv2.Idents));
+        Terms.Keyword("INDEX").SkipAnd(SMIv2.Block(
+            Separated(Terms.Char(','), Terms.Keyword("IMPLIED").ZeroOrOne().SkipAnd(SMIv2.Ident))));
 
     //  ConceptualRow = "OBJECT-TYPE"
     //      "SYNTAX" <ident>
