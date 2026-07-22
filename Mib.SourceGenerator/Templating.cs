@@ -78,13 +78,14 @@ public static class Templating
 
     public static string[] OidField(MibValuedItem item)
     {
+        var oid = item is MibTable ? item.Ident : item.Ident.ScalarInstance();
         return [
             $"",
             $"/// <summary>",
             $"/// From SNMP Mib",
             $"/// {item.Ident}",
             $"/// </summary>",
-            $"public static readonly Oid {item.Ident.Name}Oid = {item.Ident.ScalarInstance().AsLiteral()};",
+            $"public static readonly Oid {item.Ident.Name}Oid = {oid.AsLiteral()};",
         ];
     }
     public static string[] ValueField(MibValuedItem item)
@@ -182,9 +183,9 @@ public static class Templating
         return [
             $"public static {table.TableType()} TableFromValues(IReadOnlyDictionary<Oid, AsnType> values)",
             $"{{",
-            $"\t// The length of root + index nodes + column node;",
-            $"\tvar tableDepth = TableRoot.Length;",
-            $"\tvar expectedDepth = tableDepth + {table.Index.Sum(x => x.Type.UintCount ?? 1)} + 1;",
+            $"\t// OID layout: TableRoot.1.<column>.<index...>",
+            $"\tvar entryDepth = TableRoot.Length + 1;",
+            $"\tvar expectedDepth = entryDepth + 1 + {table.Index.Sum(x => x.Type.UintCount ?? 1)};",
             $"\tvar relevantValues = values",
             $"\t\t.Where(kv => kv.Key.Length >= expectedDepth && TableRoot.IsRootOf(kv.Key));",
             $"",
@@ -193,21 +194,13 @@ public static class Templating
             $"\tforeach (var kv in relevantValues)",
             $"\t{{",
             $"\t\tvar path = kv.Key.ToArray();",
-            $"\t\tvar index = new Oid(path[TableRoot.Length..^1]);",
+            $"\t\tvar column = path[entryDepth];",
+            $"\t\tvar index = new Oid(path[(entryDepth + 1)..]);",
             $"\t\tif (!entries.ContainsKey(index))",
             $"\t\t{{",
             $"\t\t\tentries[index] = new();",
             $"\t\t}}",
-            //$"\t\tentries[index] ??= new();",
-            $"\t\tentries[index].Add(path[^1], kv.Value);",
-            /*$"",
-            $"\t\tswitch (path[^1])",
-            $"\t\t{{",
-            ..table.Columns.SelectMany(x => (string[])[
-                $"\t\t\tcase {x.Ident.Oid[x.Ident.Oid.Length - 1]}: entry.{x.Ident.Name} = kv.Value; break;"
-            ]),
-            $"\t\t\tdefault: throw new NotImplementedException();",
-            $"\t\t}}",*/
+            $"\t\tentries[index].Add(column, kv.Value);",
             $"\t}}",
             $"",
             $"\treturn entries",
