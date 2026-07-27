@@ -195,6 +195,21 @@ public sealed class Oid : AsnType, ICloneable, IComparable, IEnumerable<uint>
     }
 
     /// <summary>
+    ///      Returns an Oid with the childest child removed
+    /// </summary>
+    public Oid Parent()
+    {
+        if (_data.Length == 0)
+        {
+            throw new InvalidOperationException("Can't get the parent of an empty void");
+        }
+
+        var tmp = new uint[_data.Length - 1];
+        Array.Copy(_data, 0, tmp, 0, _data.Length - 1);
+        return new Oid(tmp);
+    }
+
+    /// <summary>
     ///     Return internal integer array. This is required by static members of the class and other methods in
     ///     this library so internal attribute is applied to it.
     /// </summary>
