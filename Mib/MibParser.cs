@@ -28,7 +28,6 @@ public static class MibParser {
         var parseStack = new Stack<string>();
         context.OnEnterParser += (parser, ctx) =>
         {
-            //var s = parser is INamedParser p ? p.Name : "wtf";
             parseStack.Push(parser.ToString());
         };
         context.OnExitParser += (parser, ctx) => parseStack.Pop();
@@ -36,13 +35,15 @@ public static class MibParser {
         ModuleDefinition.Module.Compile().TryParse(context, out var result, out var maybeError);
         if (maybeError is {} error)
         {
+            var remaining = context.Scanner.Cursor.Span;
+            var preview = remaining.Slice(0, Math.Min(32, remaining.Length)).ToString().Replace("\n", "\\n");
             throw new ParseException(
                 $"""
                 Failed to parse MIB module '{moduleHint}' @ {error!.Position}
                     Error: {error!.Message}
                     Stack:
                         {string.Join(",        \n", parseStack)}
-                    Next: {context.Scanner.Cursor.Span.Slice(0, 32).ToString().Replace("\n", "\\n")}
+                    Next: {preview}
                 """,
                 error.Position
             );
@@ -53,7 +54,7 @@ public static class MibParser {
 
     public static MibModule ParseModule(
         string contents, string moduleHint = "?", 
-        IReadOnlyDictionary<string, IMibThatExports> importables = null!
+        IReadOnlyDictionary<string, IMibThatExports>? importables = null
     ) {
         return new MibModule(ParseAst(contents, moduleHint), importables ?? BuiltinMib.All);
     }
@@ -67,7 +68,7 @@ public static class MibParser {
             mod => mod.Dependencies.Where(dep => !BuiltinMib.All.ContainsKey(dep))
         );
 
-        var cache = new Dictionary<string, IMibThatExports>((Dictionary<string, IMibThatExports>)BuiltinMib.All);
+        var cache = BuiltinMib.All.ToDictionary(x => x.Key, x => x.Value);
         foreach (var mod in orderedAsts)
         {
             var name = mod.Identifier.ToString();

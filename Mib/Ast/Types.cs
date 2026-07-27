@@ -41,7 +41,7 @@ public class AstType(
         Terms.Char('(')
             .SkipAnd(Terms.Keyword("SIZE"))
             .SkipAnd(TypeRefinementValue)
-            .Then(x => new Refinement(x.Contraints, true))
+            .Then(x => new Refinement(x.Constraints, true))
             .AndSkip(Terms.Char(')'));
 
     // TypeRefinementEnum = "{" IDENT "(" <number> ")" ( "," IDENT "(" <number> ")" )* "}"
@@ -164,8 +164,8 @@ public class AstType(
         Kind switch
         {
             TypeKind.Integer32Enum => $"INTEGER {{{string.Join(", ", Values?.Cast<(TextSpan, long)>().Select(v => $"{v.Item1}({v.Item2})") ?? [])}}}",
-            TypeKind.Integer32 => Refinement?.Contraints.Count > 0 ? $"INTEGER {Refinement}" : "INTEGER",
-            TypeKind.Unsigned32 => Refinement?.Contraints.Count > 0 ? $"Unsigned32 {Refinement}" : "Unsigned32",
+            TypeKind.Integer32 => Refinement?.Constraints.Count > 0 ? $"INTEGER {Refinement}" : "INTEGER",
+            TypeKind.Unsigned32 => Refinement?.Constraints.Count > 0 ? $"Unsigned32 {Refinement}" : "Unsigned32",
             TypeKind.OctetString => Refinement?.IsSize == true ? $"OCTET STRING {Refinement}" : "OCTET STRING",
             TypeKind.IpAddress => "IpAddress",
             TypeKind.ObjectIdentifier => "OBJECT IDENTIFIER",
@@ -173,7 +173,7 @@ public class AstType(
             TypeKind.Bits => $"BITS {{{string.Join(", ", Values?.Cast<(TextSpan, long)>().Select(v => $"{v.Item1}({v.Item2})") ?? [])}}}",
             TypeKind.Counter32 => "Counter32",
             TypeKind.Counter64 => "Counter64",
-            TypeKind.Gauge32 => Refinement?.Contraints.Count > 0 ? $"Gauge32 {Refinement}" : "Gauge32",
+            TypeKind.Gauge32 => Refinement?.Constraints.Count > 0 ? $"Gauge32 {Refinement}" : "Gauge32",
             TypeKind.TimeTicks => "TimeTicks",
             null => Name?.ToString() ?? "?",
             _ => "Unknown"
@@ -191,7 +191,7 @@ public class AstType(
 
     public override int GetHashCode() =>
         Kind.GetHashCode()
-            ^ Refinement?.GetHashCode() ?? 0
-            ^ Values?.Count ?? 0
-            ^ Name?.GetHashCode() ?? 0;
+            ^ (Refinement?.GetHashCode() ?? 0)
+            ^ (Values?.Count ?? 0)
+            ^ (Name?.GetHashCode() ?? 0);
 }

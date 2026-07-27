@@ -36,7 +36,7 @@ public class MibModuleInfo(
         identifier,
         mi.LastUpdated.ToString(), mi.Organization.ToString(),
         mi.ContactInfo.ToString(), mi.Description.ToString(),
-        [..mi.Revisions.Select((date, desc) => (date.ToString(), desc.ToString()))]
+        [..mi.Revisions.Select(x => (x.Item1.ToString(), x.Item2.ToString()))]
     ) {}
 
     public override bool Equals(MibItem? other)

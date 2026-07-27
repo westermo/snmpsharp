@@ -16,10 +16,10 @@ internal static class Diagnostics
         category: "Design", DiagnosticSeverity.Error,
         isEnabledByDefault: true
     );
-    public static readonly DiagnosticDescriptor ParseAttributesError = new(
+    public static readonly DiagnosticDescriptor AttributeFilterError = new(
         id: "SNMP003",
-        title: "Something is wack whn it comes to attributes",
-        messageFormat: "Very generic: {0}",
+        title: "Failed to apply MibOids filter",
+        messageFormat: "{0}",
         category: "Design", DiagnosticSeverity.Error,
         isEnabledByDefault: true
     );

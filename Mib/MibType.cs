@@ -6,7 +6,7 @@ namespace SnmpSharpNet.Mib;
 
 public class Refinement : IEquatable<Refinement>
 {
-    public IReadOnlyList<(long Min, long Max)> Contraints { get; }
+    public IReadOnlyList<(long Min, long Max)> Constraints { get; }
     public bool IsSize { get; }
 
     public Refinement(IReadOnlyList<(long Min, long Max)> contraints, bool isSize = false)
@@ -16,7 +16,7 @@ public class Refinement : IEquatable<Refinement>
             .ThenBy(x => x.Max)
             .ToArray();
 
-        Contraints = normalized;
+        Constraints = normalized;
         IsSize = isSize;
     }
 
@@ -37,20 +37,20 @@ public class Refinement : IEquatable<Refinement>
         }
 
         return new Refinement([
-            ..left.Contraints,
-            ..right.Contraints,
+            ..left.Constraints,
+            ..right.Constraints,
         ], left.IsSize);
     }
 
     public bool Equals(Refinement? other) =>
         other is not null
         && IsSize == other.IsSize
-        && Contraints.SequenceEqual(other.Contraints);
+        && Constraints.SequenceEqual(other.Constraints);
 
     public override bool Equals(object? obj) => Equals(obj as Refinement);
 
     public override int GetHashCode() =>
-        HashCode.Combine(IsSize, Contraints.SequenceHash());
+        HashCode.Combine(IsSize, Constraints.SequenceHash());
 }
 
 public enum TypeKind
@@ -171,8 +171,8 @@ public class MibType(
         Kind switch
         {
             TypeKind.Integer32Enum => $"INTEGER {{{string.Join(", ", Values?.Select(v => $"{v.Key}({v.Value})") ?? [])}}}",
-            TypeKind.Integer32 => Refinement?.Contraints.Count > 0 ? $"INTEGER {Refinement}" : "INTEGER",
-            TypeKind.Unsigned32 => Refinement?.Contraints.Count > 0 ? $"Unsigned32 {Refinement}" : "Unsigned32",
+            TypeKind.Integer32 => Refinement?.Constraints.Count > 0 ? $"INTEGER {Refinement}" : "INTEGER",
+            TypeKind.Unsigned32 => Refinement?.Constraints.Count > 0 ? $"Unsigned32 {Refinement}" : "Unsigned32",
             TypeKind.OctetString => Refinement?.IsSize == true ? $"OCTET STRING {Refinement}" : "OCTET STRING",
             TypeKind.IpAddress => "IpAddress",
             TypeKind.ObjectIdentifier => "OBJECT IDENTIFIER",
@@ -180,7 +180,7 @@ public class MibType(
             TypeKind.Bits => $"BITS {{{string.Join(", ", Values?.Select(v => $"{v.Key}({v.Value})") ?? [])}}}",
             TypeKind.Counter32 => "Counter32",
             TypeKind.Counter64 => "Counter64",
-            TypeKind.Gauge32 => Refinement?.Contraints.Count > 0 ? $"Gauge32 {Refinement}" : "Gauge32",
+            TypeKind.Gauge32 => Refinement?.Constraints.Count > 0 ? $"Gauge32 {Refinement}" : "Gauge32",
             TypeKind.TimeTicks => "TimeTicks",
             _ => "Unknown"
         };

@@ -61,9 +61,27 @@ public class ValuedDictionary<T, U> : Dictionary<T, U>, IEquatable<ValuedDiction
     where T : IEquatable<T>
     where U : IEquatable<U>
 {
-    public bool Equals(ValuedDictionary<T, U> other)
+    public ValuedDictionary() {}
+    public ValuedDictionary(IDictionary<T, U> dictionary) : base(dictionary) {}
+
+    public bool Equals(ValuedDictionary<T, U>? other)
     {
-        return Count == other.Count && !this.Except(other).Any();;
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+        return Count == other.Count && !this.Except(other).Any();
+    }
+
+    public override bool Equals(object? obj) => Equals(obj as ValuedDictionary<T, U>);
+
+    public override int GetHashCode()
+    {
+        unchecked
+        {
+            int hash = 0;
+            foreach (var kvp in this)
+                hash += HashCode.Combine(kvp.Key, kvp.Value);
+            return hash;
+        }
     }
 }
 

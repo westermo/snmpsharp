@@ -94,21 +94,21 @@ public static class SMIv2 {
     // OTDescriptionPart = "DESCRIPTION" <string>
     public static readonly Parser<TextSpan> OTDescriptionPart =
         Terms.Keyword("DESCRIPTION")
-            .SkipAnd(SMIv2.String.ElseError("Expected string after DESCRIPTION"))
+            .SkipAnd(String.ElseError("Expected string after DESCRIPTION"))
             .WithName("OTDescriptionPart");
 
     // This is simply ignored
     // OTReferPart = "REFERENCE" <string>
     public static readonly Parser<TextSpan> OTReferPart =
         Terms.Keyword("REFERENCE")
-            .SkipAnd(SMIv2.String.ElseError("Expected string after REFERENCE"))
+            .SkipAnd(String.ElseError("Expected string after REFERENCE"))
             .WithName("OTReferPart");
 
     // This is simply ignored
     // OTUnitsPart = "UNITS" <string>
     public static readonly Parser<TextSpan> OTUnitsPart =
         Terms.Keyword("UNITS")
-            .SkipAnd(SMIv2.String.ElseError("Expected string after UNITS"))
+            .SkipAnd(String.ElseError("Expected string after UNITS"))
             .WithName("OTUnitsPart");
 
     // Note: Currently we only return status
@@ -247,7 +247,7 @@ public class EntryDef(
     //  EntryDef = IDENT "::=" "SEQUENCE" "{"
     //      (RowEntryItem ",")* RowEntryItem
     //  "}"
-    //  EntryDefItem = IDENT IDENT
+    //  RowEntryItem = IDENT Type
     new public static readonly Parser<EntryDef> Parser =
         SMIv2.Ident
             .AndSkip(Terms.Text("::="))
@@ -416,7 +416,7 @@ public class ConceptualTable(
     public AstType EntryType { get; } = entryType;
     public SMIv2Status Status { get; } = status;
 
-    //  ConceptualTable = "OBJECT-TYPE"
+    //  ConceptualTable = IDENT "OBJECT-TYPE"
     //      "SYNTAX" "SEQUENCE" "OF" <type>
     //      OTMiddlePart
     //      OidAssignment
@@ -460,7 +460,7 @@ public class ConceptualRow(
         Terms.Keyword("INDEX").SkipAnd(SMIv2.Block(
             Separated(Terms.Char(','), Terms.Keyword("IMPLIED").ZeroOrOne().SkipAnd(SMIv2.Ident))));
 
-    //  ConceptualRow = "OBJECT-TYPE"
+    //  ConceptualRow = IDENT "OBJECT-TYPE"
     //      "SYNTAX" <ident>
     //      "MAX-ACCESS" not-accessible
     //      "STATUS" <ident>
@@ -498,7 +498,7 @@ public class AugmentingConceptualRow(
     public static readonly Parser<TextSpan> OTAugmentsPart =
         Terms.Keyword("AUGMENTS").SkipAnd(SMIv2.Block(SMIv2.Ident));
 
-    //  AugmentingConceptualRow = "OBJECT-TYPE"
+    //  AugmentingConceptualRow = IDENT "OBJECT-TYPE"
     //      "SYNTAX" <ident>
     //      "MAX-ACCESS" not-accessible
     //      "STATUS" <ident>
@@ -529,8 +529,8 @@ public class LeafObject(
     public SMIv2Status Status { get; } = status;
 
     // This is simply ignored
-    // DefValPart = "DEFVAL" "{" "{" IDENT ("," IDENT)* "}""}"
-    //            | "DEFVAL" "{" <raw> "}"
+    // OTDefValPart = "DEFVAL" "{" "{" IDENT ("," IDENT)* "}""}"
+    //              | "DEFVAL" "{" <raw> "}"
     public static readonly Parser<TextSpan> OTDefValPart =
         Terms.Keyword("DEFVAL").SkipAnd(SMIv2.Block(
             OneOf(
@@ -539,7 +539,11 @@ public class LeafObject(
             ).ElseError("Expected DEFVAL value")
         )).WithName("OTDefValPart");
 
-    // LeafObject = IDENT "OBJECT-TYPE" OTSyntaxPart OTMiddlePart OTDefValPart OidAssignment
+    // LeafObject = IDENT "OBJECT-TYPE"
+    //      OTSyntaxPart
+    //      OTMiddlePart
+    //      OTDefValPart?
+    //      OidAssignment
     public static readonly Parser<LeafObject> InnerParser =
         SMIv2.Ident
             .AndSkip(Terms.Keyword("OBJECT-TYPE"))

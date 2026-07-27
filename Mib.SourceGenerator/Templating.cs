@@ -149,7 +149,7 @@ public static class Templating
             else
             {
                 return (string[])[
-                    $"var index{index.Ident.Name} = ({index.Type.AsUintType()})index[..(int){index.Type.UintCount}]).ToArray();",
+                    $"var index{index.Ident.Name} = ({index.Type.AsUintType()})index[..(int){index.Type.UintCount}].ToArray();",
                     $"index = index[(int){index.Type.UintCount}..];"
                 ];
             }

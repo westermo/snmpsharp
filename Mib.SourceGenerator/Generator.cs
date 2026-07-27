@@ -8,7 +8,7 @@ using Microsoft.CodeAnalysis.Text;
 
 namespace SnmpSharpNet.Mib.SourceGenerator;
 
-using AllMibs = (Dictionary<string, MibModule>?, ImmutableArray<Diagnostic>?);
+using AllMibs = (ValuedDictionary<string, MibModule>?, ImmutableArray<Diagnostic>?);
 
 [Generator]
 public sealed class SnmpGenerator : IIncrementalGenerator
@@ -40,7 +40,7 @@ public sealed class SnmpGenerator : IIncrementalGenerator
             
                 return errors.Count > 0
                     ? (null, errors.ToImmutableArray())
-                    : (new Dictionary<string, MibModule>(modules.Value), null);
+                    : (new ValuedDictionary<string, MibModule>(modules.Value), null);
             });
 
         var oidCarriers = context.SyntaxProvider
@@ -88,16 +88,16 @@ public sealed class SnmpGenerator : IIncrementalGenerator
             if (split.Length != 1 && split.Length != 2)
             {
                 return Diagnostic.Create(
-                    Diagnostics.ParseAttributesError,
+                    Diagnostics.AttributeFilterError,
                     location,
-                    $"Module filter '{filter}' is invalid."
+                    $"'{filter}' is not a valid filter."
                 );
             }
 
             var moduleName = split[0];
             if (!mibMods.TryGetValue(moduleName, out var module))
             {
-                return Diagnostic.Create(Diagnostics.MibNotFound, location, $"MibOids: Unknown module '{moduleName}'");
+                return Diagnostic.Create(Diagnostics.AttributeFilterError, location, $"Unknown module '{moduleName}'.");
             }
 
             if (split.Length == 1)
@@ -108,7 +108,7 @@ public sealed class SnmpGenerator : IIncrementalGenerator
             {
                 if (!module.TryImportObject(split[1], out var item))
                 {
-                    return Diagnostic.Create(Diagnostics.MibNotFound, location, $"MibOids: Unknown item '{split[1]}' in '{moduleName}'");
+                    return Diagnostic.Create(Diagnostics.AttributeFilterError, location, $"Unknown item '{split[1]}' in '{moduleName}'.");
                 }
                 items.Add(item);
             }

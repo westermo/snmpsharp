@@ -46,6 +46,7 @@ public abstract class Result<T> : IEquatable<Result<T>>
     );
 
     public abstract bool Equals(Result<T>? other);
+    public override bool Equals(object? obj) => Equals(obj as Result<T>);
 
     public static implicit operator Result<T>(T value) => new Ok<T>(value);
     public static implicit operator Result<T>(Diagnostic diag) => new Error<T>(diag);
@@ -69,6 +70,7 @@ public class Ok<T>(T inner) : Result<T>
     {
         return other is Ok<T> ok && EqualityComparer<T>.Default.Equals(inner, ok.Value);
     }
+    public override int GetHashCode() => inner?.GetHashCode() ?? 0;
 }
 
 public class Error<T>(Diagnostic diag) : Result<T>
@@ -90,4 +92,5 @@ public class Error<T>(Diagnostic diag) : Result<T>
     {
         return other is Error<T> error && diag.Equals(error.Diagnostic);
     }
+    public override int GetHashCode() => diag.GetHashCode();
 }

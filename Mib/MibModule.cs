@@ -142,6 +142,7 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
 
                 try
                 {
+                    // // TODO/XXX: Refinement.Merge should intersection, not union.
                     return new MibType(
                         resolved.Kind,
                         type.Refinement is not null
@@ -368,5 +369,14 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
     }
 
     public override bool Equals(object? obj) => Equals(obj as MibModule);
-    public override int GetHashCode() => HashCode.Combine(Identifier, Items.SequenceHash());
+    public override int GetHashCode()
+    {
+        unchecked
+        {
+            int itemsHash = 0;
+            foreach (var kvp in Items)
+                itemsHash += HashCode.Combine(kvp.Key, kvp.Value);
+            return HashCode.Combine(Identifier, itemsHash);
+        }
+    }
 }

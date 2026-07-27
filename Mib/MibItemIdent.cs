@@ -19,7 +19,7 @@ public static class ArrayExtensions
     }
 }
 
-public readonly struct MibItemIdent(uint[] oid, string?[] path)
+public readonly struct MibItemIdent(uint[] oid, string?[] path) : IEquatable<MibItemIdent>
 {
     public readonly uint[] Oid = oid;
     public readonly string?[] OidNames = path;
@@ -40,18 +40,17 @@ public readonly struct MibItemIdent(uint[] oid, string?[] path)
         return Add(0, "<scalar>");
     }
 
+    public bool Equals(MibItemIdent other)
+    {
+        return Oid.SequenceEqual(other.Oid);
+    }
 
     public override bool Equals(object obj)
     {
-        if (obj is not MibItemIdent other) { return false; }
-
-        return Oid.SequenceEqual(other.Oid);
+        return obj is MibItemIdent other && Equals(other);
     }
     
-    public override int GetHashCode()
-    {
-        return Oid.Aggregate(0, (current, t) => current ^ (t > int.MaxValue ? int.MaxValue : (int)t));
-    }
+    public override int GetHashCode() => Oid.SequenceHash();
 
     public override string ToString()
     {
@@ -69,9 +68,9 @@ public readonly struct MibItemIdent(uint[] oid, string?[] path)
     // See Annex A "Top-level arcs of the OID tree" of ITU-T X.660
     // and 3.5. "OBJECT IDENTIFIER values" of RFC2578
     // https://www.rfc-editor.org/rfc/rfc2578.html#section-3.5
-    public static MibItemIdent RootItut = new([1], [".itu-t"]);
+    public static MibItemIdent RootItut = new([0], [".itu-t"]);
     public static MibItemIdent RootIso = new([1], [".iso"]);
-    public static MibItemIdent RootJoint = new([1], [".joint-iso-itu-t"]);
+    public static MibItemIdent RootJoint = new([2], [".joint-iso-itu-t"]);
     public static IReadOnlyDictionary<string, MibItemIdent> TopLevelArcs = new Dictionary<string, MibItemIdent>
     {
         { "ccitt", RootItut },
