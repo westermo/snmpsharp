@@ -1,3 +1,7 @@
+//
+// This is a hack to get better errors
+//
+
 using Parlot.Fluent;
 using Parlot.Compilation;
 using Parlot.Rewriting;
