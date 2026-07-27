@@ -6,10 +6,8 @@ using System.Diagnostics.CodeAnalysis;
 static class ResultExtensions
 {    
     extension<T>(Result<T> result)
-        where T : IEquatable<T>
     {
         public Result<U> Select<U>(Func<T, U> selector)
-            where U : IEquatable<U>
         {
             if (result.IsOk)
             {
@@ -21,7 +19,6 @@ static class ResultExtensions
     }
 
     extension<T>(IEnumerable<Result<T>> results)
-        where T : IEquatable<T>
     {
         public IEnumerable<T> ReportAll(SourceProductionContext ctx)
         {
@@ -36,8 +33,9 @@ static class ResultExtensions
     }
 }
 public abstract class Result<T> : IEquatable<Result<T>>
-    where T : IEquatable<T>
 {
+    [MemberNotNullWhen(true, nameof(Value))]
+    [MemberNotNullWhen(false, nameof(Diagnostic))]
     public abstract bool IsOk { get; }
     public abstract T Value { get; }
     public abstract Diagnostic Diagnostic { get; }
@@ -54,7 +52,6 @@ public abstract class Result<T> : IEquatable<Result<T>>
 }
 
 public class Ok<T>(T inner) : Result<T>
-    where T : IEquatable<T>
 {
     public override bool IsOk => true;
     public override T Value => inner;
@@ -70,12 +67,11 @@ public class Ok<T>(T inner) : Result<T>
 
     public override bool Equals(Result<T>? other)
     {
-        return other is Ok<T> ok && inner.Equals(ok.Value);
+        return other is Ok<T> ok && EqualityComparer<T>.Default.Equals(inner, ok.Value);
     }
 }
 
 public class Error<T>(Diagnostic diag) : Result<T>
-    where T : IEquatable<T>
 {
     public override bool IsOk => false;
     public override T Value => throw new InvalidOperationException("Can't access .Value on Error<T>");

@@ -13,7 +13,7 @@ public interface IMibThatExports
     public bool TryImport(string ident, out MibItem? item, out MibType? type);
 }
 
-public class MibModule : IMibThatExports
+public class MibModule : IMibThatExports, IEquatable<MibModule>
 {
     public readonly string Identifier;
     public Dictionary<MibItemIdent, MibItem> Items { get; } = [];
@@ -358,4 +358,15 @@ public class MibModule : IMibThatExports
         }
         return sb.ToString();
     }
+
+
+    public bool Equals(MibModule? other)
+    {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+        return Identifier == other.Identifier && Items.DictEquals(other.Items);
+    }
+
+    public override bool Equals(object? obj) => Equals(obj as MibModule);
+    public override int GetHashCode() => HashCode.Combine(Identifier, Items.SequenceHash());
 }

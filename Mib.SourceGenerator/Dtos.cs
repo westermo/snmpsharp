@@ -8,34 +8,54 @@ using System.Collections.Generic;
 using System.Linq;
 using Parlot;
 
-using SourceSpan = Microsoft.CodeAnalysis.Text.TextSpan;
-using Microsoft.CodeAnalysis.Text;
-
 namespace SnmpSharpNet.Mib.SourceGenerator;
 
-public record struct ContextlessMibModule(ModuleDefinition Module)
-{
-    public static Result<ContextlessMibModule> TryFromAdditionalText(AdditionalText text, CancellationToken ct)
+public record struct GenMibDefinition(
+    string Name, Location Location,
+    Result<ModuleDefinition> Module
+) {
+    public static GenMibDefinition FromAdditionalText(AdditionalText text, CancellationToken ct)
     {
-        var moduleHint = Path.GetFileNameWithoutExtension(text.Path);
+        var name = Path.GetFileNameWithoutExtension(text.Path);
+        var loc = Location.FromAdditionalText(text);
         var source = text.GetText(ct)!;
+
+        Result<ModuleDefinition> module;
         try
         {
-            var module = MibParser.ParseAst(source.ToString(), moduleHint);
-            return new ContextlessMibModule(module);
+            var mod = MibParser.ParseAst(source.ToString(), name);
+            if (mod.Identifier == name)
+            {
+                module = mod;
+            }
+            else
+            {
+                module = Diagnostic.Create(Diagnostics.ParseError, loc, $"Parsed '{name}.mib' but got module '{mod.Identifier.ToString()}'");
+            }
+
         }
         catch (ParseException e)
         {
-            var pos = new LinePosition(e.Position.Line, e.Position.Column);
-            var location = Location.Create(
-                text.Path,
-                new SourceSpan(e.Position.Offset, 0),
-                new LinePositionSpan(pos, pos)
-            );
-            return Diagnostic.Create(Diagnostics.ParseError, location, e.Message);
+            module = Diagnostic.Create(Diagnostics.ParseError, loc.WithPosition(e.Position), e.Message);
+        }
+        return new GenMibDefinition(name, loc, module);
+    }
+
+    public readonly bool CollectError(List<Diagnostic> errors)
+    {
+        if (Module.IsOk)
+        {
+            return false;
+        }
+        else
+        {
+            errors.Add(Module.Diagnostic);
+            return true;
         }
     }
 }
+
+
 
 public class ValuedDictionary<T, U> : Dictionary<T, U>, IEquatable<ValuedDictionary<T, U>>
     where T : IEquatable<T>
@@ -44,5 +64,50 @@ public class ValuedDictionary<T, U> : Dictionary<T, U>, IEquatable<ValuedDiction
     public bool Equals(ValuedDictionary<T, U> other)
     {
         return Count == other.Count && !this.Except(other).Any();;
+    }
+}
+
+
+
+public record struct PartialClass(string Accessibility, string? Namespace, string TypeName, Location Location)
+{
+    public static PartialClass FromSymbol(ISymbol symbol)
+    {
+        var accessibility = symbol.DeclaredAccessibility switch {
+            Microsoft.CodeAnalysis.Accessibility.Public => "public",
+            Microsoft.CodeAnalysis.Accessibility.Private => "private",
+            Microsoft.CodeAnalysis.Accessibility.Internal => "internal",
+            Microsoft.CodeAnalysis.Accessibility.Protected => "protected",
+            Microsoft.CodeAnalysis.Accessibility.ProtectedOrInternal => "protected internal",
+            Microsoft.CodeAnalysis.Accessibility.ProtectedAndInternal => "private protected",
+            _ => "private"
+        };
+
+        var cns = symbol.ContainingNamespace;
+        var ns = cns.IsGlobalNamespace ? null : cns.ToDisplayString();
+        return new(accessibility, ns, symbol.Name, symbol.Locations.First());
+    }
+
+    public readonly string[] AsLiteral(string impls, IEnumerable<string> body)
+    {
+        string[] decl = [
+            $"{Accessibility} partial class {TypeName}{impls}",
+            $"{{",
+            ..body.Select(x => $"\t{x}"),
+            $"}}",
+        ];
+        if (Namespace is {})
+        {
+            return [
+                $"namespace {Namespace}",
+                $"{{",
+                ..decl.Select(x => $"\t{x}"),
+                $"}}"
+            ];
+        }
+        else
+        {
+            return decl;
+        }
     }
 }

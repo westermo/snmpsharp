@@ -1,10 +1,13 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Text;
+using Parlot;
+
+using CodeSpan = Microsoft.CodeAnalysis.Text.TextSpan;
 
 namespace SnmpSharpNet.Mib.SourceGenerator;
-
-using PartialClass = (string Accessibility, string? Namespace, string TypeName, Location Location);
 
 static class Extensions
 {    
@@ -61,55 +64,52 @@ static class Extensions
         }
     }
 
-    extension(PartialClass self)
-    {
-        public static PartialClass FromSymbol(ISymbol symbol)
-        {
-            var accessibility = symbol.DeclaredAccessibility switch {
-                Accessibility.Public => "public",
-                Accessibility.Private => "private",
-                Accessibility.Internal => "internal",
-                Accessibility.Protected => "protected",
-                Accessibility.ProtectedOrInternal => "protected internal",
-                Accessibility.ProtectedAndInternal => "private protected",
-                _ => "private"
-            };
-
-            var ns =
-                symbol.ContainingNamespace.IsGlobalNamespace
-                    ? null
-                    : symbol.ContainingNamespace.ToDisplayString();
-            return (accessibility, ns, symbol.Name, symbol.Locations.First());
-        }
-        public string[] AsLiteral(string impls, IEnumerable<string> body)
-        {
-            string[] decl = [
-                $"{self.Accessibility} partial class {self.TypeName}{impls}",
-                $"{{",
-                ..body.Select(x => $"\t{x}"),
-                $"}}",
-            ];
-            if (self.Namespace is {})
-            {
-                return [
-                    $"namespace {self.Namespace}",
-                    $"{{",
-                    ..decl.Select(x => $"\t{x}"),
-                    $"}}"
-                ];
-            }
-            else
-            {
-                return decl;
-            }
-        }
-    }
-
     extension(IEnumerable<string> lines)
     {
         public IEnumerable<string> Indent()
         {
             return lines.Select(line => $"\t{line}");
         }
+    }
+
+    extension(Location location)
+    {
+        public static Location FromAdditionalText(AdditionalText text)
+        {
+            return Location.Create(text.Path, new CodeSpan(), new LinePositionSpan());
+        }
+        public Location WithPosition(TextPosition position)
+        {
+            var linePos = new LinePosition(position.Line, position.Column);
+            return Location.Create(
+                location.GetLineSpan().Path,
+                new CodeSpan(position.Offset, 1),
+                new LinePositionSpan(linePos, linePos)
+            );
+        }
+    }
+
+
+    extension(IReadOnlyDictionary<string, GenMibDefinition> asts)
+    {
+        public Result<Dictionary<string, MibModule>> ConstructModules()
+        {
+            try
+            {
+                return MibParser.ParseModules(asts.ToDictionary(x => x.Key, x => x.Value.Module.Value));
+            }
+            catch (MibConstructionException e)
+            {
+                return Diagnostic.Create(Diagnostics.ParseError, asts[e.ModuleName].Location, e.ToString());
+            }
+            catch (InvalidOperationException e)
+            {
+                return Diagnostic.Create(Diagnostics.MibNotFound, Location.None, e.Message);
+            }
+            catch (KeyNotFoundException e)
+            {
+                return Diagnostic.Create(Diagnostics.MibNotFound, Location.None, e.Message);
+            }
+        } 
     }
 }

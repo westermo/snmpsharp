@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace SnmpSharpNet.Mib;
 
-public class Refinement
+public class Refinement : IEquatable<Refinement>
 {
     public IReadOnlyList<(long Min, long Max)> Contraints { get; }
     public bool IsSize { get; }
@@ -19,14 +19,6 @@ public class Refinement
         Contraints = normalized;
         IsSize = isSize;
     }
-
-    public override bool Equals(object? obj) =>
-        obj is Refinement other
-        && IsSize == other.IsSize
-        && Contraints.SequenceEqual(other.Contraints);
-
-    public override int GetHashCode() =>
-        IsSize.GetHashCode() ^ Contraints.Count;
 
     public static Refinement AllValues = new([]);
     public static Refinement AllSizes = new([], true);
@@ -49,6 +41,16 @@ public class Refinement
             ..right.Contraints,
         ], left.IsSize);
     }
+
+    public bool Equals(Refinement? other) =>
+        other is not null
+        && IsSize == other.IsSize
+        && Contraints.SequenceEqual(other.Contraints);
+
+    public override bool Equals(object? obj) => Equals(obj as Refinement);
+
+    public override int GetHashCode() =>
+        HashCode.Combine(IsSize, Contraints.SequenceHash());
 }
 
 public enum TypeKind
@@ -72,13 +74,13 @@ public class MibType(
     Refinement? refinement = null,
     IReadOnlyDictionary<string, long>? values = null,
     string? name = null
-) {
+) : IEquatable<MibType> {
     public TypeKind Kind { get; } = kind;
     public Refinement? Refinement { get; } = refinement;
     public IReadOnlyDictionary<string, long>? Values { get; } = values;
     public string? Name { get; } = name;
 
-    public static MibType FromAst(SnmpSharpNet.Mib.Ast.AstType type)
+    public static MibType FromAst(Ast.AstType type)
     {
         return new MibType(
             type.Kind ?? throw new ArgumentException($"Type '{type}' is unresolved", nameof(type)),
@@ -158,10 +160,10 @@ public class MibType(
             throw new InvalidOperationException("Cannot mix size and value constraints on same MibType instance.");
         }
 
-        var next = new SnmpSharpNet.Mib.Refinement([
+        var next = new Refinement([
             (min, max)
         ], isSize);
-        var merged = SnmpSharpNet.Mib.Refinement.Merge(current, next);
+        var merged = Refinement.Merge(current, next);
         return new MibType(Kind, merged, Values, Name);
     }
 
@@ -183,20 +185,17 @@ public class MibType(
             _ => "Unknown"
         };
 
-    public override bool Equals(object? obj)
+    public bool Equals(MibType? other)
     {
-        if (obj is not MibType other) return false;
-        
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
         return Kind == other.Kind
             && Equals(Refinement, other.Refinement)
-            && (Values?.Count ?? 0) == (other.Values?.Count ?? 0)
-            && (Values?.All(kv => other.Values?.TryGetValue(kv.Key, out var ov) == true && ov == kv.Value) ?? true)
+            && Values.DictEquals(other.Values)
             && Name == other.Name;
     }
 
-    public override int GetHashCode() =>
-        Kind.GetHashCode()
-            ^ Refinement?.GetHashCode() ?? 0
-            ^ Values?.Aggregate(0, (acc, kv) => acc ^ kv.Key.GetHashCode() ^ kv.Value.GetHashCode()) ?? 0
-            ^ Name?.GetHashCode() ?? 0;
+    public override bool Equals(object? obj) => Equals(obj as MibType);
+
+    public override int GetHashCode() => HashCode.Combine(Kind, Refinement, Values?.Count ?? 0, Name);
 }

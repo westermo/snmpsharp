@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using Mib.Ast;
 using Parlot;
@@ -152,6 +153,9 @@ public class ModuleDefinition(
     public TextSpan Identifier { get; } = identifier;
     public IReadOnlyList<Import> Imports { get; } = imports;
     public IReadOnlyList<ModuleItem> Items { get; } = items;
+
+
+    public IEnumerable<string> Dependencies =>  Imports.Select(x => x.fromModule.ToString());
 
 
     // ImportsSymbolsFromModule = Symbol ("," Symbol)* "FROM" ModuleIdentifier
