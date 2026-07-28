@@ -3,20 +3,18 @@
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-        <AssemblyVersion>1.1.0</AssemblyVersion>
         <IsAotCompatible>true</IsAotCompatible>
         <Company>Milan Sinadinovic, Westermo Network Technologies AB</Company>
         <Copyright>Copyright © Milan Sinadinovic 2008 - 2014, Westermo Network Technologies AB 2021-2025</Copyright>
         <Product>Westermo.SnmpSharpNet</Product>
         <Description>.NET Simple Network Management Protocol Implementation</Description>
         <Title>SnmpSharpNet</Title>
-        <PackageId>Westermo.$(AssemblyName)</PackageId>
         <Authors>Milan Sinadinovic, Westermo Network Technologies AB</Authors>
         <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
         <PackageProjectUrl>https://github.com/westermo/snmpsharp</PackageProjectUrl>
         <RepositoryUrl>https://github.com/westermo/snmpsharp</RepositoryUrl>
-        <Version>$(AssemblyVersion)-wmo1</Version>
         <Nullable>enable</Nullable>
+        <PackageId>Westermo.$(AssemblyName)</PackageId>
     </PropertyGroup>
 
 </Project>

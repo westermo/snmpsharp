@@ -6,6 +6,7 @@
         <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
         <IncludeBuildOutput>false</IncludeBuildOutput>
         <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+        <PackageId>Westermo.$(AssemblyName)</PackageId>
     </PropertyGroup>
 
     <ItemGroup>
