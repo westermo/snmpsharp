@@ -38,7 +38,7 @@ public class BuiltinMib : IMibThatExports
                 var oid = kvp.Value.Item1;
                 var ident = new MibItemIdent(oid, [$"<{name}>", kvp.Key]);
                 oidByName[kvp.Key] = ident;
-                Items[ident] = new MibLeaf(ident, kvp.Value.Item2);
+                Items[ident] = new MibLeaf(ident, kvp.Value.Item2, Ast.SMIv2Accessibility.ReadOnly);
             }
         }
     }
