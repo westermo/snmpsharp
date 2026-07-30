@@ -22,11 +22,10 @@ public class SourceGeneratorIntegrationTests
         // <WESTERMO-INTERFACE-MIB>::ifRefTable: 1.3.6.1.4.1.16177.2.4.1.1
         // OID layout: ifRefTable.1.<column>.<index>
         // Index 1 and 3, but a bit mixed in the ordering
+        // Note: ifRefIndex (column 1) is not-accessible, so it won't appear in SNMP responses
         { new Oid("1.3.6.1.4.1.16177.2.4.1.1.1.5.3"), new Integer32(6) }, // ifRefifType, index 3
-        { new Oid("1.3.6.1.4.1.16177.2.4.1.1.1.1.1"), new Integer32(1) },  // ifRefIndex, index 1
         { new Oid("1.3.6.1.4.1.16177.2.4.1.1.1.2.1"), new Integer32(10) }, // ifRefifIndex, index 1
         { new Oid("1.3.6.1.4.1.16177.2.4.1.1.1.3.1"), new OctetString("eth0") }, // ifRefifName, index 1
-        { new Oid("1.3.6.1.4.1.16177.2.4.1.1.1.1.3"), new Integer32(3) },  // ifRefIndex, index 3
         { new Oid("1.3.6.1.4.1.16177.2.4.1.1.1.2.3"), new Integer32(13) }, // ifRefifIndex, index 3
         { new Oid("1.3.6.1.4.1.16177.2.4.1.1.1.4.1"), new OctetString("Ethernet 0") }, // ifRefifDescr, index 1
         { new Oid("1.3.6.1.4.1.16177.2.4.1.1.1.5.1"), new Integer32(6) }, // ifRefifType, index 1
@@ -47,7 +46,6 @@ public class SourceGeneratorIntegrationTests
 
         // Verify the table entry at index 1 contains expected values
         var entry = carrier.ifRefTable.First(x => x.indexifRefIndex == new Integer32(1));
-        await Assert.That(entry.ifRefIndex).IsEqualTo(new Integer32(1));
         await Assert.That(entry.ifRefifIndex).IsEqualTo(new Integer32(10));
         await Assert.That(entry.ifRefifName).IsEqualTo(new OctetString("eth0"));
         await Assert.That(entry.ifRefifDescr).IsEqualTo(new OctetString("Ethernet 0"));
@@ -55,7 +53,6 @@ public class SourceGeneratorIntegrationTests
 
         // Verify the table entry at index 3 contains expected values
         entry = carrier.ifRefTable.First(x => x.indexifRefIndex == new Integer32(3));
-        await Assert.That(entry.ifRefIndex).IsEqualTo(new Integer32(3));
         await Assert.That(entry.ifRefifIndex).IsEqualTo(new Integer32(13));
         await Assert.That(entry.ifRefifName).IsEqualTo(new OctetString("eth3"));
         await Assert.That(entry.ifRefifDescr).IsEqualTo(new OctetString("Ethernet 3"));

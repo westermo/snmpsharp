@@ -12,6 +12,33 @@ namespace SnmpSharpNet.Mib.Ast;
 
 using Import = (IReadOnlyList<TextSpan> symbols, TextSpan fromModule);
 
+
+public enum SMIv2Status
+{
+    Current,
+    Obsolete,
+    Deprecated
+}
+
+public enum SMIv2Accessibility
+{
+    NotAccessible,
+    AccessibleForNotify,
+    ReadOnly,
+    ReadWrite,
+    ReadCreate
+}
+
+public static class SMIv2AccessibilityExtensions
+{
+    extension(SMIv2Accessibility accessibility)
+    {
+        public bool CanRead() =>
+            accessibility >= SMIv2Accessibility.ReadOnly;
+    }
+}
+
+
 // Common helpers for ASN.1 / Structure of Management Information Version 2
 // See https://www.rfc-editor.org/rfc/rfc2578.html
 public static class SMIv2 {
@@ -71,12 +98,23 @@ public static class SMIv2 {
             .SkipAnd(AstType.Parser.ElseError("Expected type after SYNTAX"))
             .WithName("OTSyntaxPart");
 
-    // This is simply ignored
-    // OTMaxAccessPart = "MAX-ACCESS" <string>
-    public static readonly Parser<TextSpan> OTMaxAccessPart =
+    // OTMaxAccessPart = "MAX-ACCESS" AccessSpecifier
+    // AccessSpecifier = "not-accessible"
+    //                 | "accessible-for-notify"
+    //                 | "read-only"
+    //                 | "read-write"
+    //                 | "read-create"
+    public static readonly Parser<SMIv2Accessibility> OTMaxAccessPart =
         Terms.Keyword("MAX-ACCESS")
-            .SkipAnd(Ident)
-            .WithName("OTMaxAccessPart");
+            .SkipAnd(
+                OneOf(
+                    Terms.Keyword("not-accessible").Then(static x => SMIv2Accessibility.NotAccessible),
+                    Terms.Keyword("accessible-for-notify").Then(static x => SMIv2Accessibility.AccessibleForNotify),
+                    Terms.Keyword("read-only").Then(static x => SMIv2Accessibility.ReadOnly),
+                    Terms.Keyword("read-write").Then(static x => SMIv2Accessibility.ReadWrite),
+                    Terms.Keyword("read-create").Then(static x => SMIv2Accessibility.ReadCreate)
+                ).ElseError("Expected 'not-accessible', 'accessible-for-notify', 'read-only', 'read-write' or 'read-create' after MAX-ACCESS")
+            ).WithName("OTMaxAccessPart");
 
     // OTStatusPart = "STATUS" ("current" | "deprecated" | "obsolete")
     public static readonly Parser<SMIv2Status> OTStatusPart =
@@ -111,17 +149,17 @@ public static class SMIv2 {
             .SkipAnd(String.ElseError("Expected string after UNITS"))
             .WithName("OTUnitsPart");
 
-    // Note: Currently we only return status
+    // Note: Currently we only return max-access and status
     //  OTMiddlePart =
     //      OTUnitsPart?
     //      OTMaxAccessPart
     //      OTStatusPart
     //      OTDescriptionPart
     //      OTReferPart?
-    public static readonly Parser<SMIv2Status> OTMiddlePart =
+    public static readonly Parser<(SMIv2Accessibility, SMIv2Status)> OTMiddlePart =
         OTUnitsPart.ZeroOrOne()
-            .AndSkip(OTMaxAccessPart.ElseError("Expected 'MAX-ACCESS' in object type"))
-            .SkipAnd(OTStatusPart.ElseError("Expected 'STATUS' in object type"))
+            .SkipAnd(OTMaxAccessPart.ElseError("Expected 'MAX-ACCESS' in object type"))
+            .And(OTStatusPart.ElseError("Expected 'STATUS' in object type"))
             .AndSkip(OTDescriptionPart.ZeroOrOne())
             .AndSkip(OTReferPart.ZeroOrOne())
             .WithName("OTMiddlePart");
@@ -139,12 +177,6 @@ public class UnresolvedOid(
     public long Oid { get; } = oid;
 };
 
-public enum SMIv2Status
-{
-    Current,
-    Obsolete,
-    Deprecated
-}
 public class ModuleDefinition(
     TextSpan identifier,
     IReadOnlyList<Import> imports,
@@ -232,6 +264,17 @@ public abstract class OidAssigner(
 ) : ModuleItem {
     public TextSpan Name { get; } = name;
     public UnresolvedOid Oid { get; } = oid;
+}
+
+// Common ancestor for all OBJECT-TYPE based definitions
+public abstract class ObjectType(
+    TextSpan name,
+    UnresolvedOid oid,
+    SMIv2Accessibility accessibility,
+    SMIv2Status status
+) : OidAssigner(name, oid) {
+    public SMIv2Accessibility Accessibility { get; } = accessibility;
+    public SMIv2Status Status { get; } = status;
 }
 
 // A <EntryType> defintion in 7.1.12 "Conceptual Tables" of RFC2578
@@ -411,10 +454,10 @@ public class ConceptualTable(
     TextSpan name,
     UnresolvedOid oid,
     AstType entryType,
+    SMIv2Accessibility accessibility,
     SMIv2Status status
-) : OidAssigner(name, oid) {
+) : ObjectType(name, oid, accessibility, status) {
     public AstType EntryType { get; } = entryType;
-    public SMIv2Status Status { get; } = status;
 
     //  ConceptualTable = IDENT "OBJECT-TYPE"
     //      "SYNTAX" "SEQUENCE" "OF" <type>
@@ -430,7 +473,7 @@ public class ConceptualTable(
             .And(SMIv2.OTMiddlePart)
             .And(SMIv2.OidAssignment)
             .Then(static x => new ConceptualTable(
-                x.Item1, x.Item4, x.Item2, x.Item3))
+                x.Item1, x.Item4, x.Item2, x.Item3.Item1, x.Item3.Item2))
             .WithName("ConceptualTable");
 }
 
@@ -441,11 +484,11 @@ public class ConceptualRow(
     TextSpan name,
     UnresolvedOid oid,
     AstType entryType,
+    SMIv2Accessibility accessibility,
     SMIv2Status status,
     IReadOnlyList<TextSpan> index
-) : OidAssigner(name, oid) {
+) : ObjectType(name, oid, accessibility, status) {
     public AstType EntryType { get; } = entryType;
-    public SMIv2Status Status { get; } = status;
     public IReadOnlyList<TextSpan> Index { get; } = index;
 
     //
@@ -476,7 +519,7 @@ public class ConceptualRow(
             .And(OTIndexPart)
             .And(SMIv2.OidAssignment)
             .Then(static x => new ConceptualRow(
-                x.Item1, x.Item5, x.Item2, x.Item3, x.Item4))
+                x.Item1, x.Item5, x.Item2, x.Item3.Item1, x.Item3.Item2, x.Item4))
             .WithName("ConceptualRow");
 }
 
@@ -487,11 +530,11 @@ public class AugmentingConceptualRow(
     TextSpan name,
     UnresolvedOid oid,
     AstType entryType,
+    SMIv2Accessibility accessibility,
     SMIv2Status status,
     TextSpan augments
-) : OidAssigner(name, oid) {
+) : ObjectType(name, oid, accessibility, status) {
     public AstType EntryType { get; } = entryType;
-    public SMIv2Status Status { get; } = status;
     public TextSpan Augments { get; } = augments;
 
     // OTAugmentsPart = "AUGMENTS" "{" Entry "}"
@@ -514,7 +557,7 @@ public class AugmentingConceptualRow(
             .And(OTAugmentsPart)
             .And(SMIv2.OidAssignment)
             .Then(static x => new AugmentingConceptualRow(
-                x.Item1, x.Item5, x.Item2, x.Item3, x.Item4))
+                x.Item1, x.Item5, x.Item2, x.Item3.Item1, x.Item3.Item2, x.Item4))
             .WithName("AugmentingConceptualRow");
 }
 
@@ -523,10 +566,10 @@ public class LeafObject(
     TextSpan name,
     UnresolvedOid oid,
     AstType syntax,
+    SMIv2Accessibility accessibility,
     SMIv2Status status
-) : OidAssigner(name, oid) {
+) : ObjectType(name, oid, accessibility, status) {
     public AstType Syntax { get; } = syntax;
-    public SMIv2Status Status { get; } = status;
 
     // This is simply ignored
     // OTDefValPart = "DEFVAL" "{" "{" IDENT ("," IDENT)* "}""}"
@@ -552,7 +595,7 @@ public class LeafObject(
             .AndSkip(OTDefValPart.ZeroOrOne())
             .And(SMIv2.OidAssignment)
             .Then(static x => new LeafObject(
-                x.Item1, x.Item4, x.Item2, x.Item3))
+                x.Item1, x.Item4, x.Item2, x.Item3.Item1, x.Item3.Item2))
             .WithName("LeafObject");
 }
 

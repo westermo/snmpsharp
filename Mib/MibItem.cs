@@ -69,15 +69,17 @@ public class MibTable(MibItemIdent ident, MibLeaf[] index, MibLeaf[] columns) : 
     public override int GetHashCode() => HashCode.Combine(base.GetHashCode(), Index.SequenceHash(), Columns.SequenceHash());
 }
 
-public class MibLeaf(MibItemIdent ident, MibType type) : MibValuedItem(ident)
+public class MibLeaf(MibItemIdent ident, MibType type, SMIv2Accessibility accessibility) : MibValuedItem(ident)
 {
     public readonly MibType Type = type;
+    public readonly SMIv2Accessibility Accessibility = accessibility;
 
     public override bool Equals(MibItem? other)
     {
         if (other is not MibLeaf o) { return false; }
         return Ident.Equals(o.Ident)
-            && Type.Equals(o.Type);
+            && Type.Equals(o.Type)
+            && Accessibility == o.Accessibility;
     }
-    public override int GetHashCode() => HashCode.Combine(base.GetHashCode(), Type);
+    public override int GetHashCode() => HashCode.Combine(base.GetHashCode(), Type, Accessibility);
 }

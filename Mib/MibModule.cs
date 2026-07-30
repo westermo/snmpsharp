@@ -183,7 +183,7 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
         foreach (var lo in module.Items.OfType<LeafObject>())
         {
             var oid = GetOid(lo.Name.ToString());
-            Items.Add(oid, new MibLeaf(oid, ResolveType(lo.Syntax)));
+            Items.Add(oid, new MibLeaf(oid, ResolveType(lo.Syntax), lo.Accessibility));
         }
 
         foreach (var table in module.Items.OfType<ConceptualTable>())
@@ -264,7 +264,7 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
                         throw new Exception($"ConceptualTable({oid}): field '{field.name}' is not a LeafObject");
                     }
                     return col;
-                });
+                }).Where(c => c.Accessibility.CanRead());
             Items.Add(oid, new MibTable(oid, [..index], [..columns]));
         }
 
