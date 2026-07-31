@@ -138,11 +138,20 @@ public static class Templating
     public static string[] EntryFromValues(MibTable table)
     {
         var indexPart = table.Index.SelectMany((index, i) => {
+            var isLast = i == table.Index.Length - 1;
+            if (index.IsImplied && index.Type.UintCount is null)
+            {
+                // IMPLIED: no length prefix, consume the rest of the index span
+                return (string[])[
+                    $"var index{index.Ident.Name} = ({index.Type.AsUintType()})index.ToArray();",
+                    $"index = default;"
+                ];
+            }
             if (index.Type.UintCount is null)
             {
                 return (string[])[
                     $"var index{index.Ident.Name} = ({index.Type.AsUintType()})index[1..(int)(1+index[0])].ToArray();",
-                    $"index = index[(int)index[0]..];"
+                    $"index = index[(int)(1+index[0])..];"
                 ];
             }
             else if (index.Type.UintCount == 1)
@@ -184,14 +193,22 @@ public static class Templating
 
     public static string[] TableFromValues(MibTable table)
     {
+        var hasVariableLengthIndex = table.Index.Any(x => x.Type.UintCount is null);
+        // For fixed-length indexes we can compute the exact expected OID depth.
+        // For variable-length indexes (OctetString, OID, etc.) the depth varies
+        // per row, so we only require that the OID is longer than entry+column.
+        var depthCheck = hasVariableLengthIndex
+            ? $"\tvar minDepth = entryDepth + 2;"  // at least column + 1 index component
+            : $"\tvar minDepth = entryDepth + 1 + {table.Index.Sum(x => x.Type.UintCount!.Value)};";
+
         return [
             $"public static {table.TableType()} TableFromValues(IReadOnlyDictionary<Oid, AsnType> values)",
             $"{{",
             $"\t// OID layout: TableRoot.1.<column>.<index...>",
             $"\tvar entryDepth = TableRoot.Length + 1;",
-            $"\tvar expectedDepth = entryDepth + 1 + {table.Index.Sum(x => x.Type.UintCount ?? 1)};",
+            depthCheck,
             $"\tvar relevantValues = values",
-            $"\t\t.Where(kv => kv.Key.Length >= expectedDepth && TableRoot.IsRootOf(kv.Key));",
+            $"\t\t.Where(kv => kv.Key.Length >= minDepth && TableRoot.IsRootOf(kv.Key));",
             $"",
             $"\tvar entries = new Dictionary<Oid, Dictionary<uint, AsnType>>();",
             $"",
@@ -254,6 +271,13 @@ public static class Templating
     public static string[] EntryToValues(MibTable table)
     {
         var indexParts = table.Index.SelectMany(index => {
+            if (index.IsImplied && index.Type.UintCount is null)
+            {
+                // IMPLIED: no length prefix
+                return (string[])[
+                    $"indexOid.AddRange(index{index.Ident.Name});"
+                ];
+            }
             if (index.Type.UintCount is null)
             {
                 return (string[])[

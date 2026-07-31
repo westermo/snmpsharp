@@ -54,9 +54,27 @@ public class MibModuleInfo(
 
 public class MibValuedItem(MibItemIdent ident) : MibItem(ident) {}
 
-public class MibTable(MibItemIdent ident, MibLeaf[] index, MibLeaf[] columns) : MibValuedItem(ident)
+public readonly struct MibTableIndex(MibLeaf leaf, bool isImplied = false) : IEquatable<MibTableIndex>
 {
-    public readonly MibLeaf[] Index = index;
+    public readonly MibLeaf Leaf = leaf;
+    public readonly bool IsImplied = isImplied;
+
+    // Convenience accessors — keeps downstream code concise
+    public MibItemIdent Ident => Leaf.Ident;
+    public MibType Type => Leaf.Type;
+
+    public bool Equals(MibTableIndex other) =>
+        Leaf.Equals(other.Leaf) && IsImplied == other.IsImplied;
+
+    public override bool Equals(object obj) =>
+        obj is MibTableIndex other && Equals(other);
+
+    public override int GetHashCode() => HashCode.Combine(Leaf, IsImplied);
+}
+
+public class MibTable(MibItemIdent ident, MibTableIndex[] index, MibLeaf[] columns) : MibValuedItem(ident)
+{
+    public readonly MibTableIndex[] Index = index;
     public readonly MibLeaf[] Columns = columns;
 
     public override bool Equals(MibItem? other)

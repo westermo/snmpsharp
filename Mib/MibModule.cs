@@ -201,8 +201,8 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
                 throw new Exception($"ConceptualTable({oid}): No item at .1");
             }
 
-            IReadOnlyList<TextSpan>? rowIndex = null;
-            MibLeaf[]? augmentsIndex = null;
+            IReadOnlyList<(TextSpan Name, bool IsImplied)>? rowIndex = null;
+            MibTableIndex[]? augmentsIndex = null;
             if (rowAssigner is ConceptualRow row)
             {
                 if (table.EntryType.ToString() != row.EntryType.ToString() || table.Status != row.Status)
@@ -233,7 +233,7 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
                 throw new Exception($"ConceptualTable({oid}): .1 is not a ConceptualRow or AugmentingConceptualRow");
             }
 
-            MibLeaf[] index;
+            MibTableIndex[] index;
             if (augmentsIndex is not null)
             {
                 index = augmentsIndex;
@@ -241,16 +241,16 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
             else
             {
                 index = rowIndex!
-                    .Select((name, idx) => {
-                        if (Items.TryGetValue(GetOid(name.ToString()), out var _item) && _item is MibLeaf item)
+                    .Select((entry, idx) => {
+                        if (Items.TryGetValue(GetOid(entry.Name.ToString()), out var _item) && _item is MibLeaf item)
                         {
-                            return item;
+                            return new MibTableIndex(item, entry.IsImplied);
                         }
-                        if (importedItems.TryGetValue(name.ToString(), out _item) && _item is MibLeaf imported)
+                        if (importedItems.TryGetValue(entry.Name.ToString(), out _item) && _item is MibLeaf imported)
                         {
-                            return imported;
+                            return new MibTableIndex(imported, entry.IsImplied);
                         }
-                        throw new Exception($"ConceptualTable({oid}): INDEX '{name}' is not a LeafObject");
+                        throw new Exception($"ConceptualTable({oid}): INDEX '{entry.Name}' is not a LeafObject");
                     })
                     .ToArray();
             }
