@@ -201,7 +201,7 @@ public class ParsingTests
 {
     [Test]
     //[Arguments("TEST.mib")]
-    [Arguments("IANAifType-MIB.mib", "WESTERMO-OID-MIB.mib", "WESTERMO-INTERFACE-MIB.mib")]
+    [Arguments("IANAifType-MIB.mib", "IF-MIB.mib", "WESTERMO-OID-MIB.mib", "WESTERMO-INTERFACE-MIB.mib")]
     [Arguments("SNMP-FRAMEWORK-MIB.mib", "IANA-ADDRESS-FAMILY-NUMBERS-MIB.mib", "LLDP-MIB.mib")]
     public async Task CanParseMibs(params string[] mibs)
     {
@@ -221,7 +221,14 @@ public class ParsingTests
     [Test]
     public async Task TableColumns_CanBeSparse()
     {
-        var module = MibParser.ParseModule(await File.ReadAllTextAsync("MAU-MIB.mib"), "mib", BuiltinMib.All);
+        var importCache = new Dictionary<string, IMibThatExports>(BuiltinMib.All);
+        foreach (var dep in new[] { "IANAifType-MIB.mib", "IF-MIB.mib" })
+        {
+            var depModule = MibParser.ParseModule(await File.ReadAllTextAsync(dep), dep, importCache);
+            importCache.Add(depModule.Identifier, depModule);
+        }
+
+        var module = MibParser.ParseModule(await File.ReadAllTextAsync("MAU-MIB.mib"), "mib", importCache);
         var table = module.Items.Values
             .OfType<MibTable>()
             .First(x => x.Ident.Name == "ifMauAutoNegTable");
