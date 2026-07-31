@@ -7,7 +7,6 @@ namespace SnmpSharpNet.Mib.Tests;
 
 public abstract class ParseTestCase(string Name)
 {
-
     public static IEnumerable<ParseTestCase> AllCases()
     {
         yield return EmptyModule;
@@ -21,6 +20,7 @@ public abstract class ParseTestCase(string Name)
         yield return IgnoredObjectGroup;
         yield return IgnoredModuleCompliance;
     }
+
     public static readonly ParseTestCase EmptyModule = new ParseTestCase<ModuleDefinition>(
         nameof(EmptyModule),
         ModuleDefinition.EntryPoint,
@@ -177,6 +177,7 @@ class ParseTestCase<T>(string Name, Parser<T> Parser, string ToParse) : ParseTes
         {
             throw new Exception("Test case ToParse must contain a '$' sentinel");
         }
+
         var context = new ParseContext(new Scanner(ToParse))
         {
             WhiteSpaceParser = SMIv2.MibWhiteSpace
@@ -186,10 +187,12 @@ class ParseTestCase<T>(string Name, Parser<T> Parser, string ToParse) : ParseTes
         {
             throw new Exception($"Parse failed: {error?.Message}");
         }
+
         context.SkipWhiteSpace();
         if (context.Scanner.Cursor.Position.Offset != expectedEnd)
         {
-            throw new Exception($"Parser stopped at offset {context.Scanner.Cursor.Position.Offset}, expected {expectedEnd}");
+            throw new Exception(
+                $"Parser stopped at offset {context.Scanner.Cursor.Position.Offset}, expected {expectedEnd}");
         }
     }
 }
@@ -198,7 +201,7 @@ public class ParsingTests
 {
     [Test]
     //[Arguments("TEST.mib")]
-    [Arguments("IANAifType-MIB.mib", "WESTERMO-OID-MIB.mib", "WESTERMO-INTERFACE-MIB.mib")]
+    [Arguments("IANAifType-MIB.mib", "IF-MIB.mib", "WESTERMO-OID-MIB.mib", "WESTERMO-INTERFACE-MIB.mib")]
     [Arguments("SNMP-FRAMEWORK-MIB.mib", "IANA-ADDRESS-FAMILY-NUMBERS-MIB.mib", "LLDP-MIB.mib")]
     public async Task CanParseMibs(params string[] mibs)
     {
@@ -206,7 +209,7 @@ public class ParsingTests
 
         foreach (var mib in mibs)
         {
-            var module = MibParser.ParseModule(File.ReadAllText(mib), "mib", importCache);
+            var module = MibParser.ParseModule(await File.ReadAllTextAsync(mib), "mib", importCache);
             importCache.Add(module.Identifier, module);
             Console.WriteLine("\n-----------------");
             Console.WriteLine($"-- {module.Identifier}");
@@ -218,7 +221,14 @@ public class ParsingTests
     [Test]
     public async Task TableColumns_CanBeSparse()
     {
-        var module = MibParser.ParseModule(File.ReadAllText("MAU-MIB.mib"), "mib", BuiltinMib.All);
+        var importCache = new Dictionary<string, IMibThatExports>(BuiltinMib.All);
+        foreach (var dep in new[] { "IANAifType-MIB.mib", "IF-MIB.mib" })
+        {
+            var depModule = MibParser.ParseModule(await File.ReadAllTextAsync(dep), dep, importCache);
+            importCache.Add(depModule.Identifier, depModule);
+        }
+
+        var module = MibParser.ParseModule(await File.ReadAllTextAsync("MAU-MIB.mib"), "mib", importCache);
         var table = module.Items.Values
             .OfType<MibTable>()
             .First(x => x.Ident.Name == "ifMauAutoNegTable");

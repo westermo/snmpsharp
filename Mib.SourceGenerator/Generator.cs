@@ -73,9 +73,12 @@ public sealed class SnmpGenerator : IIncrementalGenerator
                     return (carrier.Item1, carrier.items);
                 });
             
-            ctx.AddSource("SnmpMibData.Generated.cs",
-                string.Join("\n", Templating.DataFile(carriers))
-            );
+            foreach (var (decl, items) in carriers)
+            {
+                ctx.AddSource($"{decl.TypeName}.Generated.cs",
+                    string.Join("\n", Templating.DataFile(decl, items))
+                );
+            }
         });
     }
 

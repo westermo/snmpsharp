@@ -3,11 +3,11 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 
-static class ResultExtensions
-{    
+internal static class ResultExtensions
+{
     extension<T>(Result<T> result)
     {
-        public Result<U> Select<U>(Func<T, U> selector)
+        public Result<TOut> Select<TOut>(Func<T, TOut> selector)
         {
             if (result.IsOk)
             {
@@ -32,11 +32,13 @@ static class ResultExtensions
         }
     }
 }
+
 public abstract class Result<T> : IEquatable<Result<T>>
 {
     [MemberNotNullWhen(true, nameof(Value))]
     [MemberNotNullWhen(false, nameof(Diagnostic))]
     public abstract bool IsOk { get; }
+
     public abstract T Value { get; }
     public abstract Diagnostic Diagnostic { get; }
 
@@ -47,6 +49,7 @@ public abstract class Result<T> : IEquatable<Result<T>>
 
     public abstract bool Equals(Result<T>? other);
     public override bool Equals(object? obj) => Equals(obj as Result<T>);
+    public abstract override int GetHashCode();
 
     public static implicit operator Result<T>(T value) => new Ok<T>(value);
     public static implicit operator Result<T>(Diagnostic diag) => new Error<T>(diag);
@@ -61,7 +64,8 @@ public class Ok<T>(T inner) : Result<T>
     public override bool OrReport(
         SourceProductionContext ctx,
         [MaybeNullWhen(false)] out T value
-    ) {
+    )
+    {
         value = inner;
         return true;
     }
@@ -70,6 +74,7 @@ public class Ok<T>(T inner) : Result<T>
     {
         return other is Ok<T> ok && EqualityComparer<T>.Default.Equals(inner, ok.Value);
     }
+
     public override int GetHashCode() => inner?.GetHashCode() ?? 0;
 }
 
@@ -82,7 +87,8 @@ public class Error<T>(Diagnostic diag) : Result<T>
     public override bool OrReport(
         SourceProductionContext ctx,
         [MaybeNullWhen(false)] out T value
-    ) {
+    )
+    {
         ctx.ReportDiagnostic(diag);
         value = default;
         return false;
@@ -92,5 +98,6 @@ public class Error<T>(Diagnostic diag) : Result<T>
     {
         return other is Error<T> error && diag.Equals(error.Diagnostic);
     }
+
     public override int GetHashCode() => diag.GetHashCode();
 }

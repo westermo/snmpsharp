@@ -202,18 +202,23 @@ public class ModuleDefinition(
             .SkipAnd(ImportsSymbolsFromModule.ZeroOrMany())
             .AndSkip(Terms.Char(';').ElseError("Expected ';' after IMPORTS"));
 
-    // We don't implement EXPORTS as it's explicitly not allowed in SMIv2
-    // See section 3.3 "Exporting Symbols" of RFC 2578
+    // EXPORTS is not allowed in SMIv2 (section 3.3 of RFC 2578)
+    // but some real-world MIBs include it, so we skip it if present.
     // https://www.rfc-editor.org/rfc/rfc2578.html#section-3.3
     //
+    // Exports = "EXPORTS" <raw> ";"
+    static readonly Parser<TextSpan> ExportsParser =
+        Terms.Keyword("EXPORTS")
+            .SkipAnd(AnyCharBefore(Terms.Char(';'), consumeDelimiter: true));
+
     // Module     = IDENT "DEFINITIONS" "::=" "BEGIN" ModuleBody? "END"
     // ModuleBody =  Exports? Imports? ModuleItem*
-    // Exports    = "EXPORTS" <raw> ";"
     public static Parser<ModuleDefinition> Module =
         SMIv2.Ident
             .AndSkip(Terms.Keyword("DEFINITIONS").ElseError("Expected 'DEFINITIONS' after module name"))
             .AndSkip(Terms.Text("::=").ElseError("Expected '::=' after DEFINITIONS"))
             .AndSkip(Terms.Keyword("BEGIN").ElseError("Expected 'BEGIN'"))
+            .AndSkip(ExportsParser.ZeroOrOne())
             .And(ImportsParser.Optional().Then(static x => x.OrSome([])))
             .And(ModuleItem.Parser.ZeroOrMany())
             .AndSkip(Terms.Keyword("END").ElseError("Expected 'END' or a valid top-level definition"))
@@ -233,6 +238,8 @@ public abstract class ModuleItem
     //            | ObjectGroup
     //            | NotificationGroup
     //            | ModuleCompliance
+    //            | AgentCapabilities
+    //            | TrapType
     //            // Assignments 
     //            | ObjectIdentifier | ObjectIdentity
     //            | ModuleIdentity
@@ -247,6 +254,8 @@ public abstract class ModuleItem
             MacroObjectGroup.InnerParser,
             MacroNotificationGroup.InnerParser,
             MacroModuleCompliance.InnerParser,
+            MacroAgentCapabilities.InnerParser,
+            MacroTrapType.InnerParser,
             ObjectIdentifier.InnerParser,
             ObjectIdentifier.ObjectIdentity,
             ModuleIdentity.InnerParser,
@@ -486,22 +495,27 @@ public class ConceptualRow(
     AstType entryType,
     SMIv2Accessibility accessibility,
     SMIv2Status status,
-    IReadOnlyList<TextSpan> index
+    IReadOnlyList<(TextSpan Name, bool IsImplied)> index
 ) : ObjectType(name, oid, accessibility, status) {
     public AstType EntryType { get; } = entryType;
-    public IReadOnlyList<TextSpan> Index { get; } = index;
+    public IReadOnlyList<(TextSpan Name, bool IsImplied)> Index { get; } = index;
 
-    //
-    // XXX/TODO: `IMPLIED` is simply ignored.
-    //
     // See "7.7.  Mapping of the INDEX clause" of RFC2578
     // https://www.rfc-editor.org/rfc/rfc2578.html#section-7.7
+    // IMPLIED means the index value is not length-prefixed in the OID encoding;
+    // it can only appear on the last index component.
+    //
     // OTIndexPart = "INDEX" "{" OTIndexItems "}"
     // OTIndexItems = (IDENT ",")* "IMPLIED" IDENT
     //              | (IDENT ",")* IDENT
-    public static readonly Parser<IReadOnlyList<TextSpan>> OTIndexPart =
+    static readonly Parser<(TextSpan Name, bool IsImplied)> IndexItem =
+        Terms.Keyword("IMPLIED").ZeroOrOne()
+            .And(SMIv2.Ident)
+            .Then(static x => (x.Item2, x.Item1 is not null));
+
+    public static readonly Parser<IReadOnlyList<(TextSpan, bool)>> OTIndexPart =
         Terms.Keyword("INDEX").SkipAnd(SMIv2.Block(
-            Separated(Terms.Char(','), Terms.Keyword("IMPLIED").ZeroOrOne().SkipAnd(SMIv2.Ident))));
+            Separated(Terms.Char(','), IndexItem)));
 
     //  ConceptualRow = IDENT "OBJECT-TYPE"
     //      "SYNTAX" <ident>
@@ -666,4 +680,41 @@ public class MacroModuleCompliance : ModuleItem {
             .AndSkip(SMIv2.Block(AnyCharBefore(Terms.Char('}'))))
             .Then(static x => instance)
             .WithName("ModuleCompliance");
+}
+
+// SNMP `AGENT-CAPABILITIES` macro (RFC 2580)
+// We don't use this for code generation, so we skip it entirely.
+public class MacroAgentCapabilities : ModuleItem {
+    private static readonly MacroAgentCapabilities instance = new();
+
+    //  AgentCapabilities = IDENT "AGENT-CAPABILITIES"
+    //      ... (complex body)
+    //      "::=" "{" <raw> "}"
+    public static readonly Parser<MacroAgentCapabilities> InnerParser =
+        SMIv2.Ident
+            .AndSkip(Terms.Keyword("AGENT-CAPABILITIES"))
+            .AndSkip(AnyCharBefore(Literals.Text("::="), consumeDelimiter: true))
+            .AndSkip(SMIv2.Block(AnyCharBefore(Terms.Char('}'))))
+            .Then(static x => instance)
+            .WithName("AgentCapabilities");
+}
+
+// SNMPv1 `TRAP-TYPE` macro (RFC 1215)
+// Legacy construct; we skip it but still need to consume it to avoid parse errors.
+public class MacroTrapType : ModuleItem {
+    private static readonly MacroTrapType instance = new();
+
+    //  TrapType = IDENT "TRAP-TYPE"
+    //      "ENTERPRISE" IDENT
+    //      ("VARIABLES" "{" Idents "}")?
+    //      ("DESCRIPTION" <string>)?
+    //      ("REFERENCE" <string>)?
+    //      "::=" <number>
+    public static readonly Parser<MacroTrapType> InnerParser =
+        SMIv2.Ident
+            .AndSkip(Terms.Keyword("TRAP-TYPE"))
+            .AndSkip(AnyCharBefore(Literals.Text("::="), consumeDelimiter: true))
+            .AndSkip(Terms.Integer())
+            .Then(static x => instance)
+            .WithName("TrapType");
 }
