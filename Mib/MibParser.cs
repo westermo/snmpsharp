@@ -15,6 +15,8 @@ public class MibConstructionException(string moduleName, Exception innerExceptio
 
 public static class MibParser
 {
+    private static readonly Parser<ModuleDefinition> CompiledModule = ModuleDefinition.Module.Compile();
+
     public static ModuleDefinition ParseAst(string contents, string moduleHint = "?")
     {
         var context = new ParseContext(new Scanner(contents))
@@ -27,7 +29,7 @@ public static class MibParser
         context.OnEnterParser += (parser, ctx) => { parseStack.Push(parser.ToString()); };
         context.OnExitParser += (parser, ctx) => parseStack.Pop();
 
-        ModuleDefinition.Module.Compile().TryParse(context, out var result, out var maybeError);
+        CompiledModule.TryParse(context, out var result, out var maybeError);
         if (maybeError is { } error)
         {
             var remaining = context.Scanner.Cursor.Span;
