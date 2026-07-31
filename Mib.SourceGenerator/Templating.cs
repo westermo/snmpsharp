@@ -15,10 +15,6 @@ public static class Templating
         namespace SnmpSharpNet.Mib.Attributes
         {
             [global::Microsoft.CodeAnalysis.EmbeddedAttribute]
-            [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
-            public sealed class MibModulesAttribute(params string[] modules) : Attribute {}
-
-            [global::Microsoft.CodeAnalysis.EmbeddedAttribute]
             [AttributeUsage(AttributeTargets.Class)]
             public sealed class MibOidsAttribute(params string[] modules) : Attribute {}
         }

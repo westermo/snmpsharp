@@ -1,8 +1,6 @@
 //using SnmpSharpNet;
 using SnmpSharpNet.Mib.Attributes;
 
-//[assembly: MibModules("IANAifType-MIB", "IANA-ADDRESS-FAMILY-NUMBERS-MIB", "IF-MIB", "WESTERMO-OID-MIB", "WESTERMO-INTERFACE-MIB", "SNMP-FRAMEWORK-MIB", "LLDP-MIB")]
-
 namespace SnmpSharpNet.Mib.SourceGenerator.IntegrationTests;
 
 [MibOids("WESTERMO-INTERFACE-MIB")]
