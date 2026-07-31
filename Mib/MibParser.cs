@@ -1,5 +1,3 @@
-
-
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -15,10 +13,10 @@ public class MibConstructionException(string moduleName, Exception innerExceptio
     public string ModuleName => moduleName;
 }
 
-public static class MibParser {
+public static class MibParser
+{
     public static ModuleDefinition ParseAst(string contents, string moduleHint = "?")
     {
-
         var context = new ParseContext(new Scanner(contents))
         {
             WhiteSpaceParser = SMIv2.MibWhiteSpace
@@ -26,25 +24,22 @@ public static class MibParser {
 
 
         var parseStack = new Stack<string>();
-        context.OnEnterParser += (parser, ctx) =>
-        {
-            parseStack.Push(parser.ToString());
-        };
+        context.OnEnterParser += (parser, ctx) => { parseStack.Push(parser.ToString()); };
         context.OnExitParser += (parser, ctx) => parseStack.Pop();
-        
+
         ModuleDefinition.Module.Compile().TryParse(context, out var result, out var maybeError);
-        if (maybeError is {} error)
+        if (maybeError is { } error)
         {
             var remaining = context.Scanner.Cursor.Span;
             var preview = remaining.Slice(0, Math.Min(32, remaining.Length)).ToString().Replace("\n", "\\n");
             throw new ParseException(
                 $"""
-                Failed to parse MIB module '{moduleHint}' @ {error!.Position}
-                    Error: {error!.Message}
-                    Stack:
-                        {string.Join(",        \n", parseStack)}
-                    Next: {preview}
-                """,
+                 Failed to parse MIB module '{moduleHint}' @ {error!.Position}
+                     Error: {error!.Message}
+                     Stack:
+                         {string.Join(",        \n", parseStack)}
+                     Next: {preview}
+                 """,
                 error.Position
             );
         }
@@ -53,16 +48,18 @@ public static class MibParser {
     }
 
     public static MibModule ParseModule(
-        string contents, string moduleHint = "?", 
+        string contents, string moduleHint = "?",
         IReadOnlyDictionary<string, IMibThatExports>? importables = null
-    ) {
+    )
+    {
         return new MibModule(ParseAst(contents, moduleHint), importables ?? BuiltinMib.All);
     }
 
 
     public static Dictionary<string, MibModule> ParseModules(
         IReadOnlyDictionary<string, ModuleDefinition> asts
-    ) {
+    )
+    {
         var orderedAsts = TopologicalSort(
             asts,
             mod => mod.Dependencies.Where(dep => !BuiltinMib.All.ContainsKey(dep))
@@ -74,14 +71,14 @@ public static class MibParser {
             var name = mod.Identifier.ToString();
             try
             {
-                cache[name] = new MibModule(mod, cache);           
+                cache[name] = new MibModule(mod, cache);
             }
             catch (Exception e)
             {
                 throw new MibConstructionException(name, e);
             }
         }
-        
+
         return cache
             .Where(kvp => kvp.Value is MibModule && asts.ContainsKey(kvp.Key))
             .ToDictionary(kvp => kvp.Key, kvp => (MibModule)kvp.Value);
@@ -90,30 +87,11 @@ public static class MibParser {
     private static IEnumerable<ModuleDefinition> TopologicalSort(
         IReadOnlyDictionary<string, ModuleDefinition> asts,
         Func<ModuleDefinition, IEnumerable<string>> getDeps
-    ) {
+    )
+    {
         var visited = new HashSet<string>();
         var stack = new HashSet<string>();
         var result = new List<ModuleDefinition>();
-
-        void Visit(string key)
-        {
-            if (visited.Contains(key)) { return; }
-            if (!stack.Add(key))
-            {
-                throw new InvalidOperationException($"Module '{key}' has a circular dependency");
-            }
-            if (!asts.TryGetValue(key, out var module))
-            {
-                throw new KeyNotFoundException($"Module '{key}' is not found");
-            }
-            foreach (var dep in getDeps(module))
-            {
-                Visit(dep);
-            }
-            stack.Remove(key);
-            visited.Add(key);
-            result.Add(module);
-        }
 
         foreach (var key in asts.Keys)
         {
@@ -121,5 +99,32 @@ public static class MibParser {
         }
 
         return result;
+
+        void Visit(string key)
+        {
+            if (visited.Contains(key))
+            {
+                return;
+            }
+
+            if (!stack.Add(key))
+            {
+                throw new InvalidOperationException($"Module '{key}' has a circular dependency");
+            }
+
+            if (!asts.TryGetValue(key, out var module))
+            {
+                throw new KeyNotFoundException($"Module '{key}' is not found");
+            }
+
+            foreach (var dep in getDeps(module))
+            {
+                Visit(dep);
+            }
+
+            stack.Remove(key);
+            visited.Add(key);
+            result.Add(module);
+        }
     }
 }
