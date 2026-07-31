@@ -15,6 +15,7 @@
 
     <ItemGroup>
         <None Include="../mibs/*.mib" Link="$(Filename)$(Extension)" CopyToOutputDirectory="PreserveNewest"/>
+        <None Include="../golden-oids/*.json" Link="golden-oids/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest"/>
     </ItemGroup>
 
 </Project>

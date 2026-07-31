@@ -80,4 +80,34 @@ public class SourceGeneratorIntegrationTests
         await Assert.That(carrier).IsNotNull();
         await Assert.That(carrier!.ifRefTable.Count).IsEqualTo(0);
     }
+
+    [Test]
+    public async Task ToValues_Roundtrip_Table()
+    {
+        var original = WestermoInterfaceMib.FromValues(Values)!;
+        var roundtripped = original.ToValues();
+
+        // Roundtrip: FromValues → ToValues → FromValues should yield identical data
+        var reconstructed = WestermoInterfaceMib.FromValues((IReadOnlyDictionary<Oid, AsnType>)roundtripped)!;
+
+        await Assert.That(reconstructed.ifRefTable.Length).IsEqualTo(original.ifRefTable.Length);
+
+        var entry = reconstructed.ifRefTable.First(x => x.indexifRefIndex == new Integer32(1));
+        await Assert.That(entry.ifRefifIndex).IsEqualTo(new Integer32(10));
+        await Assert.That(entry.ifRefifName).IsEqualTo(new OctetString("eth0"));
+        await Assert.That(entry.ifRefifDescr).IsEqualTo(new OctetString("Ethernet 0"));
+        await Assert.That(entry.ifRefifType).IsEqualTo(new Integer32(6));
+    }
+
+    [Test]
+    public async Task ToValues_Roundtrip_Scalars()
+    {
+        var original = LldpMib.FromValues(Values)!;
+        var roundtripped = original.ToValues();
+
+        await Assert.That(roundtripped[new Oid("1.0.8802.1.1.2.1.3.1.0")])
+            .IsEqualTo(new Integer32(4));
+        await Assert.That(roundtripped[new Oid("1.0.8802.1.1.2.1.3.2.0")])
+            .IsEqualTo(new OctetString([0x00, 0x11, 0xB4, 0x62, 0x2E, 0xE0]));
+    }
 }

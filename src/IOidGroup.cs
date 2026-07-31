@@ -11,4 +11,5 @@ public interface IOidGroup<TSelf>
     static abstract IEnumerable<Oid> BatchOids  { get; }
 
     static abstract TSelf? FromValues(IReadOnlyDictionary<Oid, AsnType> values);
+    IDictionary<Oid, AsnType> ToValues();
 }

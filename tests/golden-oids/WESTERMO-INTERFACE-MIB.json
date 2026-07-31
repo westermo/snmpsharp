@@ -1,0 +1,16 @@
+{
+  "wmoInterface": "1.3.6.1.4.1.16177.2.4",
+  "wmoInterfaceConformance": "1.3.6.1.4.1.16177.2.4.2",
+  "wmoInterfaceCompliances": "1.3.6.1.4.1.16177.2.4.2.2",
+  "wmoInterfaceCompliance": "1.3.6.1.4.1.16177.2.4.2.2.1",
+  "wmoInterfaceGroups": "1.3.6.1.4.1.16177.2.4.2.1",
+  "wmoInterfaceGroup": "1.3.6.1.4.1.16177.2.4.2.1.1",
+  "wmoInterfaceObjects": "1.3.6.1.4.1.16177.2.4.1",
+  "ifRefTable": "1.3.6.1.4.1.16177.2.4.1.1",
+  "ifRefEntry": "1.3.6.1.4.1.16177.2.4.1.1.1",
+  "ifRefifType": "1.3.6.1.4.1.16177.2.4.1.1.1.5",
+  "ifRefifDescr": "1.3.6.1.4.1.16177.2.4.1.1.1.4",
+  "ifRefifName": "1.3.6.1.4.1.16177.2.4.1.1.1.3",
+  "ifRefifIndex": "1.3.6.1.4.1.16177.2.4.1.1.1.2",
+  "ifRefIndex": "1.3.6.1.4.1.16177.2.4.1.1.1.1"
+}

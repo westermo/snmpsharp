@@ -70,7 +70,9 @@ public static class Templating
             ),
             $"];",
             $"",
-            ..FromValues(decl.TypeName, items)
+            ..FromValues(decl.TypeName, items),
+            $"",
+            ..ToValues(items)
         ]);
     }
 
@@ -125,6 +127,10 @@ public static class Templating
             ..EntryFromValues(table).Indent(),
             $"",
             ..TableFromValues(table).Indent(),
+            $"",
+            ..EntryToValues(table).Indent(),
+            $"",
+            ..TableToValues(table).Indent(),
             $"}}"
         ];
     }
@@ -225,6 +231,77 @@ public static class Templating
             $"",
             $"\treturn value;",
             $"}}",
+        ];
+    }
+
+    public static string[] ToValues(IEnumerable<MibItem> items)
+    {
+        return [
+            $"public IDictionary<Oid, AsnType> ToValues()",
+            $"{{",
+            $"\tvar result = new Dictionary<Oid, AsnType>();",
+            ..items.OfType<MibLeaf>().Select(
+                x => $"\tif({x.Ident.Name} is not NoSuchInstance) {{ result[{x.Ident.Name}Oid] = {x.Ident.Name}; }}"
+            ),
+            ..items.OfType<MibTable>().Select(
+                x => $"\tforeach (var kv in {x.Ident.Name}Entry.TableToValues({x.Ident.Name})) result[kv.Key] = kv.Value;"
+            ),
+            $"\treturn result;",
+            $"}}",
+        ];
+    }
+
+    public static string[] EntryToValues(MibTable table)
+    {
+        var indexParts = table.Index.SelectMany(index => {
+            if (index.Type.UintCount is null)
+            {
+                return (string[])[
+                    $"indexOid.Add((uint)index{index.Ident.Name}.Length);",
+                    $"indexOid.AddRange(index{index.Ident.Name});"
+                ];
+            }
+            else if (index.Type.UintCount == 1)
+            {
+                return (string[])[
+                    $"indexOid.Add(index{index.Ident.Name});"
+                ];
+            }
+            else
+            {
+                return (string[])[
+                    $"indexOid.AddRange(index{index.Ident.Name});"
+                ];
+            }
+        });
+
+        return [
+            $"public IDictionary<Oid, AsnType> EntryToValues()",
+            $"{{",
+            $"\tvar indexOid = new List<uint>();",
+            ..indexParts.Indent(),
+            $"\tvar result = new Dictionary<Oid, AsnType>();",
+            ..table.Columns.Select(col =>
+                $"\tresult[new Oid((uint[])[..TableRoot, 1, {col.Ident.Oid.Last()}, ..indexOid])] = {col.Ident.Name};"
+            ),
+            $"\treturn result;",
+            $"}}"
+        ];
+    }
+
+    public static string[] TableToValues(MibTable table)
+    {
+        return [
+            $"public static IDictionary<Oid, AsnType> TableToValues({table.TableType()} entries)",
+            $"{{",
+            $"\tvar result = new Dictionary<Oid, AsnType>();",
+            $"\tforeach (var entry in entries)",
+            $"\t{{",
+            $"\t\tforeach (var kv in entry.EntryToValues())",
+            $"\t\t\tresult[kv.Key] = kv.Value;",
+            $"\t}}",
+            $"\treturn result;",
+            $"}}"
         ];
     }
 
