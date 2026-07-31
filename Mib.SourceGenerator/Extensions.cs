@@ -57,9 +57,8 @@ static class Extensions
         {
             return type.UintCount switch
             {
-                null => "uint[]",
                 1 => "uint",
-                _ => $"uint[{type.UintCount}]"
+                _ => "uint[]"
             };
         }
     }
