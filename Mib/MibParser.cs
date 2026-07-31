@@ -25,8 +25,8 @@ public static class MibParser
         };
 
 
-        var parseStack = new Stack<string>();
-        context.OnEnterParser += (parser, ctx) => { parseStack.Push(parser.ToString()); };
+        var parseStack = new Stack<object>();
+        context.OnEnterParser += (parser, ctx) => { parseStack.Push(parser); };
         context.OnExitParser += (parser, ctx) => parseStack.Pop();
 
         CompiledModule.TryParse(context, out var result, out var maybeError);
@@ -36,8 +36,8 @@ public static class MibParser
             var preview = remaining.Slice(0, Math.Min(32, remaining.Length)).ToString().Replace("\n", "\\n");
             throw new ParseException(
                 $"""
-                 Failed to parse MIB module '{moduleHint}' @ {error!.Position}
-                     Error: {error!.Message}
+                 Failed to parse MIB module '{moduleHint}' @ {error.Position}
+                     Error: {error.Message}
                      Stack:
                          {string.Join(",        \n", parseStack)}
                      Next: {preview}
