@@ -142,7 +142,6 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
 
                 try
                 {
-                    // // TODO/XXX: Refinement.Merge should intersection, not union.
                     return new MibType(
                         resolved.Kind,
                         type.Refinement is not null

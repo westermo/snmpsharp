@@ -47,6 +47,7 @@ public abstract class Result<T> : IEquatable<Result<T>>
 
     public abstract bool Equals(Result<T>? other);
     public override bool Equals(object? obj) => Equals(obj as Result<T>);
+    public abstract override int GetHashCode();
 
     public static implicit operator Result<T>(T value) => new Ok<T>(value);
     public static implicit operator Result<T>(Diagnostic diag) => new Error<T>(diag);

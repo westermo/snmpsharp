@@ -23,7 +23,11 @@ public class Refinement : IEquatable<Refinement>
     public static Refinement AllValues = new([]);
     public static Refinement AllSizes = new([], true);
 
-    public static Refinement? Merge(Refinement? left, Refinement? right)
+    /// <summary>
+    /// Union: accumulates constraints from both sides (value is in left OR right).
+    /// Used by <see cref="MibType.WithConstraint"/> to build up allowed ranges.
+    /// </summary>
+    public static Refinement? Union(Refinement? left, Refinement? right)
     {
         if (left is null && right is null) return null;
         if (left is null || right is null)
@@ -40,6 +44,46 @@ public class Refinement : IEquatable<Refinement>
             ..left.Constraints,
             ..right.Constraints,
         ], left.IsSize);
+    }
+
+    /// <summary>
+    /// Intersection: narrows constraints so that only values allowed by both sides remain.
+    /// Per RFC 2578 §11, a subtype refinement must narrow the parent type's range.
+    /// An empty constraint list means "all values allowed" (unconstrained).
+    /// </summary>
+    public static Refinement? Merge(Refinement? left, Refinement? right)
+    {
+        if (left is null && right is null) return null;
+        if (left is null || right is null)
+        {
+            throw new InvalidOperationException("Cannot merge refineable and non-refineable types.");
+        }
+
+        if (left.IsSize != right.IsSize)
+        {
+            throw new InvalidOperationException("Cannot merge size and value refinements.");
+        }
+
+        // Unconstrained intersected with anything yields the other side
+        if (left.Constraints.Count == 0) return right;
+        if (right.Constraints.Count == 0) return left;
+
+        // Compute pairwise range intersections
+        var result = new List<(long Min, long Max)>();
+        foreach (var l in left.Constraints)
+        {
+            foreach (var r in right.Constraints)
+            {
+                var min = Math.Max(l.Min, r.Min);
+                var max = Math.Min(l.Max, r.Max);
+                if (min <= max)
+                {
+                    result.Add((min, max));
+                }
+            }
+        }
+
+        return new Refinement(result, left.IsSize);
     }
 
     public bool Equals(Refinement? other) =>
@@ -163,7 +207,7 @@ public class MibType(
         var next = new Refinement([
             (min, max)
         ], isSize);
-        var merged = Refinement.Merge(current, next);
+        var merged = Refinement.Union(current, next);
         return new MibType(Kind, merged, Values, Name);
     }
 
