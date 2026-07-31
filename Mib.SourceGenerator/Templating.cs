@@ -35,7 +35,7 @@ public static class Templating
         ];
     }
 
-    public static string[] DataFile(IEnumerable<(PartialClass, ImmutableArray<MibItem>)> decls)
+    public static string[] DataFile(PartialClass decl, ImmutableArray<MibItem> items)
     {
         return [
             $"#nullable enable",
@@ -44,7 +44,7 @@ public static class Templating
             $"using System.Collections.Generic;",
             $"using SnmpSharpNet;",
             $"",
-            ..decls.SelectMany(x => PartialClass(x.Item1, x.Item2))
+            ..PartialClass(decl, items)
         ];
     }
 
@@ -236,7 +236,7 @@ public static class Templating
     public static string[] FromValues(string type, IEnumerable<MibItem> items)
     {
         return [
-            $"public static {type}? FromValues(IReadOnlyDictionary<Oid, AsnType> values)",
+            $"public static {type} FromValues(IReadOnlyDictionary<Oid, AsnType> values)",
             $"{{",
             $"\tvar value = new {type}();",
             ..items.OfType<MibLeaf>().Select(
