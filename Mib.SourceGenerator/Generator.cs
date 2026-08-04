@@ -42,7 +42,7 @@ public sealed class SnmpGenerator : IIncrementalGenerator
 
                 if (errors.Count > 0)
                 {
-                    return (null, errors.ToImmutableArray());
+                    return (null, [.. errors]);
                 }
 
                 // Return warnings together with the successful result so they can be emitted

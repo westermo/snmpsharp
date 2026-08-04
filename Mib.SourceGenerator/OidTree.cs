@@ -5,16 +5,10 @@ using System.Linq;
 
 namespace SnmpSharpNet.Mib.SourceGenerator;
 
-internal sealed class OidTreeNode
+internal sealed class OidTreeNode(uint arc, OidTreeNode? parent)
 {
-    public OidTreeNode(uint arc, OidTreeNode? parent)
-    {
-        Arc = arc;
-        Parent = parent;
-    }
-
-    public uint Arc { get; }
-    public OidTreeNode? Parent { get; }
+    public uint Arc { get; } = arc;
+    public OidTreeNode? Parent { get; } = parent;
     public string? RawName { get; private set; }
     public string? ModuleName { get; private set; }
     public MibItem? Item { get; private set; }
@@ -162,16 +156,18 @@ internal static class OidTreeNaming
         }
 
         var oid = string.Join(".", node.AncestorsAndSelf().Skip(1).Select(x => x.Arc));
-        if (CanonicalArcs.TryGetValue(oid, out var canonical))
-        {
-            return canonical;
-        }
-
-        return FormatIdentifier(TrimModulePrefix(node.RawName, node.ModuleName) ?? $"Arc{node.Arc}");
+        return CanonicalArcs.TryGetValue(oid, out var canonical)
+            ? canonical
+            : FormatIdentifier(TrimModulePrefix(node.RawName, node.ModuleName) ?? $"Arc{node.Arc}");
     }
 
-    public static string TypeName(OidTreeNode node) =>
-        FormatIdentifier(TrimModulePrefix(node.RawName, node.ModuleName) ?? $"Arc{node.Arc}");
+    public static string TypeName(OidTreeNode node)
+    {
+        var oid = string.Join(".", node.AncestorsAndSelf().Skip(1).Select(x => x.Arc));
+        return CanonicalArcs.TryGetValue(oid, out var canonical)
+            ? canonical
+            : FormatIdentifier(TrimModulePrefix(node.RawName, node.ModuleName) ?? $"Arc{node.Arc}");
+    }
 
     public static string ModuleName(string moduleName)
     {
@@ -180,7 +176,7 @@ internal static class OidTreeNaming
             ? moduleName.Substring(0, moduleName.Length - suffix.Length)
             : moduleName;
         return string.Concat(name
-            .Split(new[] { '-', '_' }, StringSplitOptions.RemoveEmptyEntries)
+            .Split(['-', '_'], StringSplitOptions.RemoveEmptyEntries)
             .Select(FormatIdentifier));
     }
 

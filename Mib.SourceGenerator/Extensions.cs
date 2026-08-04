@@ -4,13 +4,12 @@ using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
 using Parlot;
-
 using CodeSpan = Microsoft.CodeAnalysis.Text.TextSpan;
 
 namespace SnmpSharpNet.Mib.SourceGenerator;
 
-static class Extensions
-{    
+internal static class Extensions
+{
     extension(MibItemIdent ident)
     {
         public string AsLiteral()
@@ -23,8 +22,9 @@ static class Extensions
     {
         public string EntryType()
         {
-            return $"{table.Ident.CSharpName()}Entry";
+            return $"{table.Ident.CSharpName(null)}Entry";
         }
+
         public string TableType()
         {
             return $"{table.EntryType()}[]";
@@ -33,7 +33,13 @@ static class Extensions
 
     extension(MibItemIdent ident)
     {
-        public string CSharpName() => OidTreeNaming.FormatIdentifier(ident.Name ?? "Unnamed");
+        public string CSharpName(string? skip)
+        {
+            var baseName = OidTreeNaming.FormatIdentifier(ident.Name ?? "Unnamed");
+            if (skip is null || skip == baseName) return baseName;
+            var trimmed = baseName.Replace(skip, string.Empty);
+            return char.IsDigit(trimmed[0]) ? baseName : trimmed;
+        }
     }
 
     extension(MibType type)
@@ -82,6 +88,7 @@ static class Extensions
         {
             return Location.Create(text.Path, new CodeSpan(), new LinePositionSpan());
         }
+
         public Location WithPosition(TextPosition position)
         {
             var linePos = new LinePosition(position.Line, position.Column);
@@ -114,6 +121,6 @@ static class Extensions
             {
                 return Diagnostic.Create(Diagnostics.MibNotFound, Location.None, e.Message);
             }
-        } 
+        }
     }
 }

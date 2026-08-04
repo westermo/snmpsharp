@@ -783,9 +783,9 @@ public sealed class Oid : AsnType, ICloneable, IComparable, IEnumerable<uint>
     /// <param name="oid1">Oid class to add id to</param>
     /// <param name="id">Id value to add to the oid</param>
     /// <returns>New Oid class with id added to the Oid class.</returns>
-    public static Oid? operator +(Oid? oid1, uint id)
+    public static Oid operator +(Oid oid1, uint id)
     {
-        return oid1 is null ? null : new Oid(oid1) { id };
+        return new Oid(oid1) { id };
     }
 
     /// <summary>
@@ -899,6 +899,7 @@ public sealed class Oid : AsnType, ICloneable, IComparable, IEnumerable<uint>
 
         return written + slice;
     }
+
     /// <summary>
     ///     Encode single OID instance value
     /// </summary>

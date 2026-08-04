@@ -10,7 +10,8 @@ public class SourceGeneratorIntegrationTests
     [Test]
     public async Task GeneratedLeaf_ExposesParentRelativeOid()
     {
-        var oid = global::Snmp.Iso.Std.Iso8802.Ieee802dot1.Ieee802dot1mibs.Lldp.Objects.LocalSystemData.LocChassisIdSubtype.Oid;
+        var oid = global::Snmp.Iso.Std.Iso8802.Ieee802dot1.Ieee802dot1mibs.Lldp.Objects.LocalSystemData
+            .LocChassisIdSubtype.Oid;
 
         await Assert.That(oid).IsEqualTo(new Oid("1.0.8802.1.1.2.1.3.1"));
         await Assert.That(LldpLocalSystemData.LocChassisIdSubtype.InstanceOid)
@@ -48,8 +49,8 @@ public class SourceGeneratorIntegrationTests
         var entries = IfRefTable.FromValues(values);
 
         await Assert.That(entries).HasSingleItem();
-        await Assert.That(entries[0].IndexIfRefIndex).IsEqualTo(1u);
-        await Assert.That(entries[0].IfRefifName).IsEqualTo(new OctetString("eth0"));
+        await Assert.That(entries[0].IndexIndex).IsEqualTo(1u);
+        await Assert.That(entries[0].ifName).IsEqualTo(new OctetString("eth0"));
         var roundTripped = IfRefTable.ToValues(entries);
         await Assert.That(roundTripped.Count).IsEqualTo(values.Count);
         await Assert.That(roundTripped[new Oid("1.3.6.1.4.1.16177.2.4.1.1.1.3.1")])

@@ -1,22 +1,15 @@
 using System;
 using System.Collections.Generic;
-using System.Collections.Immutable;
 using System.Linq;
 using System.Text;
 using Microsoft.CodeAnalysis;
 
 namespace SnmpSharpNet.Mib.SourceGenerator;
 
-internal sealed class GeneratedSource
+internal sealed class GeneratedSource(string hintName, string source)
 {
-    public GeneratedSource(string hintName, string source)
-    {
-        HintName = hintName;
-        Source = source;
-    }
-
-    public string HintName { get; }
-    public string Source { get; }
+    public string HintName { get; } = hintName;
+    public string Source { get; } = source;
 }
 
 internal static class TreeTemplating
@@ -30,12 +23,15 @@ internal static class TreeTemplating
             if (node.IsNamespace)
             {
                 var @namespace = OidTreeNaming.NamespaceFor(node);
-                var typeName = $"{@namespace}.Constants";
+                var typeName = $"{@namespace}.Id";
                 if (emitted.Add(typeName) && compilation.GetTypeByMetadataName(typeName) is null)
                 {
                     yield return new GeneratedSource(
-                        HintName(@namespace, "Constants", node),
-                        string.Join("\n", NamespaceConstants(@namespace, OidExpression(node))));
+                        HintName(@namespace, "Id", "Identifiers"),
+                        string.Join("\n",
+                            NamespaceConstants(@namespace,
+                                OidExpression(node),
+                                OidTreeNaming.TypeName(node))));
                 }
 
                 continue;
@@ -47,10 +43,15 @@ internal static class TreeTemplating
             if (emitted.Add(valueTypeName) && compilation.GetTypeByMetadataName(valueTypeName) is null)
             {
                 yield return new GeneratedSource(
-                    HintName(parentNamespace, name, node),
+                    HintName(parentNamespace, name, name.Contains("Table") ? "Tables" : "Leafs"),
                     string.Join("\n", ValueType(parentNamespace, name, node)));
             }
         }
+    }
+
+    private static string NodeName(OidTreeNode node)
+    {
+        return node.RawName ?? node.Arc.ToString();
     }
 
     private static IEnumerable<OidTreeNode> Descendants(OidTreeNode node) =>
@@ -58,7 +59,7 @@ internal static class TreeTemplating
             .OrderBy(child => child.Arc)
             .SelectMany(child => new[] { child }.Concat(Descendants(child)));
 
-    private static string[] NamespaceConstants(string @namespace, string oidExpression) =>
+    private static string[] NamespaceConstants(string @namespace, string oidExpression, string name) =>
     [
         "#nullable enable",
         "using SnmpSharpNet;",
@@ -66,10 +67,12 @@ internal static class TreeTemplating
         $"namespace {@namespace}",
         "{",
         "\t/// <summary>OID for this branch of the SNMP object tree.</summary>",
-        "\tpublic static class Constants",
+        "\tpublic class Id : IBranchIdentifier",
         "\t{",
         "\t\tprivate static Oid? _oid;",
         $"\t\tpublic static Oid Oid => _oid ??= {oidExpression};",
+        $"\t\tpublic static string BranchName => \"{name}\";",
+        $"\t\tpublic static string FullBranchName => \"{@namespace}\";",
         "\t}",
         "}"
     ];
@@ -95,16 +98,17 @@ internal static class TreeTemplating
             $"namespace {@namespace}",
             "{",
             $"\t/// <summary>{string.Join(".", node.AncestorsAndSelf().Skip(1).Select(x => x.Arc))}</summary>",
-            $"\tpublic static class {name}",
+            $"\tpublic class {name} : IBranchIdentifier",
             "\t{",
-            "\t\tprivate static Oid? _oid;",
-            $"\t\tpublic static Oid Oid => _oid ??= {OidExpression(node)};"
+            $"\t\tpublic static Oid Oid => field ??= {OidExpression(node)};",
+            $"\t\tpublic static string BranchName => \"{name}\";",
+            $"\t\tpublic static string FullBranchName => \"{@namespace}\";"
         };
 
         if (!hasTableAncestor)
         {
             lines.Add("\t\tprivate static Oid? _instanceOid;");
-            lines.Add("\t\tpublic static Oid InstanceOid => _instanceOid ??= Oid.Append(0);");
+            lines.Add("\t\tpublic static Oid InstanceOid => _instanceOid ??= Oid + 0;");
         }
 
         lines.Add(
@@ -127,37 +131,40 @@ internal static class TreeTemplating
             $"namespace {@namespace}",
             "{",
             $"\t/// <summary>{string.Join(".", node.AncestorsAndSelf().Skip(1).Select(x => x.Arc))}</summary>",
-            $"\tpublic static class {name}",
+            $"\tpublic class {name} : ISnmpTable<{table.TableType()}>",
             "\t{",
-            "\t\tprivate static Oid? _oid;",
-            $"\t\tpublic static Oid Oid => _oid ??= {OidExpression(node)};",
+            $"\t\tpublic static Oid Oid => field ??= {OidExpression(node)};",
+            $"\t\tpublic static string BranchName => \"{name}\";",
+            $"\t\tpublic static string FullBranchName => \"{@namespace}\";",
             "",
             $"\t\tpublic static {table.TableType()} FromValues(IReadOnlyDictionary<Oid, AsnType> values) => {table.EntryType()}.TableFromValues(values);",
             $"\t\tpublic static IDictionary<Oid, AsnType> ToValues({table.TableType()} entries) => {table.EntryType()}.TableToValues(entries);",
             ""
         };
 
-        lines.AddRange(Templating.TableEntry("public", table).Select(line => $"\t\t{line}"));
 
+        lines.Add("\t}");
+        lines.AddRange(Templating.TableEntry("public", table));
         foreach (var child in node.Children.Values.OrderBy(child => child.Arc))
         {
             lines.Add("");
-            lines.AddRange(NestedNode(child, "\t\t", "Oid"));
+            lines.AddRange(NestedNode(child, $"{name}.Oid"));
         }
 
-        lines.Add("\t}");
         lines.Add("}");
         return [.. lines];
     }
 
-    private static IEnumerable<string> NestedNode(OidTreeNode node, string indent, string parentOid)
+    private static IEnumerable<string> NestedNode(OidTreeNode node, string parentOid)
     {
         var name = OidTreeNaming.TypeName(node);
-        var expression = $"{parentOid}.Append({node.Arc}u)";
-        yield return $"public static class {name}";
+        var expression = $"{parentOid} + {node.Arc}u";
+        var @interface = node.Item is MibLeaf l ? $"ISnmpLeaf<{l.Type.AsAsnType()}>" : "IBranchIdentifier";
+        yield return $"public class {name} : {@interface}";
         yield return "{";
-        yield return "\tprivate static Oid? _oid;";
-        yield return $"\tpublic static Oid Oid => _oid ??= {expression};";
+        yield return $"\tpublic static Oid Oid => field ??= {expression};";
+        yield return $"\tpublic static string BranchName => \"{name}\";";
+        yield return $"\tpublic static string FullBranchName => \"{OidTreeNaming.NamespaceFor(node)}\";";
 
         if (node.Item is MibLeaf leaf)
         {
@@ -168,7 +175,7 @@ internal static class TreeTemplating
         foreach (var child in node.Children.Values.OrderBy(child => child.Arc))
         {
             yield return "";
-            foreach (var line in NestedNode(child, indent + "\t", "Oid"))
+            foreach (var line in NestedNode(child, "Oid"))
             {
                 yield return $"\t{line}";
             }
@@ -185,12 +192,12 @@ internal static class TreeTemplating
         }
 
         var parentNamespace = OidTreeNaming.NamespaceFor(node.Parent!);
-        return $"global::{parentNamespace}.Constants.Oid.Append({node.Arc}u)";
+        return $"global::{parentNamespace}.Id.Oid + {node.Arc}";
     }
 
-    private static string HintName(string @namespace, string name, OidTreeNode node)
+    private static string HintName(string @namespace, string name, string folder)
     {
-        var builder = new StringBuilder("SnmpSharpNet.Mib.SourceGenerator/");
+        var builder = new StringBuilder($"Snmp.{folder}/");
         builder.Append(@namespace.Replace("@", string.Empty))
             .Append('.')
             .Append(name.Replace("@", string.Empty))
