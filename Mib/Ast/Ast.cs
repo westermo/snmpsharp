@@ -149,19 +149,20 @@ public static class SMIv2 {
             .SkipAnd(String.ElseError("Expected string after UNITS"))
             .WithName("OTUnitsPart");
 
-    // Note: Currently we only return max-access and status
+    // Note: Currently we only return max-access, status and description
     //  OTMiddlePart =
     //      OTUnitsPart?
     //      OTMaxAccessPart
     //      OTStatusPart
     //      OTDescriptionPart
     //      OTReferPart?
-    public static readonly Parser<(SMIv2Accessibility, SMIv2Status)> OTMiddlePart =
+    public static readonly Parser<(SMIv2Accessibility, SMIv2Status, TextSpan?)> OTMiddlePart =
         OTUnitsPart.ZeroOrOne()
             .SkipAnd(OTMaxAccessPart.ElseError("Expected 'MAX-ACCESS' in object type"))
             .And(OTStatusPart.ElseError("Expected 'STATUS' in object type"))
-            .AndSkip(OTDescriptionPart.ZeroOrOne())
+            .And(OTDescriptionPart.ZeroOrOne().Then(static x => x.Length == 0 ? (TextSpan?)null : x))
             .AndSkip(OTReferPart.ZeroOrOne())
+            .Then(static x => (x.Item1, x.Item2, x.Item3))
             .WithName("OTMiddlePart");
 }
 
@@ -280,10 +281,12 @@ public abstract class ObjectType(
     TextSpan name,
     UnresolvedOid oid,
     SMIv2Accessibility accessibility,
-    SMIv2Status status
+    SMIv2Status status,
+    TextSpan? description
 ) : OidAssigner(name, oid) {
     public SMIv2Accessibility Accessibility { get; } = accessibility;
     public SMIv2Status Status { get; } = status;
+    public TextSpan? Description { get; } = description;
 }
 
 // A <EntryType> defintion in 7.1.12 "Conceptual Tables" of RFC2578
@@ -464,8 +467,9 @@ public class ConceptualTable(
     UnresolvedOid oid,
     AstType entryType,
     SMIv2Accessibility accessibility,
-    SMIv2Status status
-) : ObjectType(name, oid, accessibility, status) {
+    SMIv2Status status,
+    TextSpan? description
+) : ObjectType(name, oid, accessibility, status, description) {
     public AstType EntryType { get; } = entryType;
 
     //  ConceptualTable = IDENT "OBJECT-TYPE"
@@ -482,7 +486,7 @@ public class ConceptualTable(
             .And(SMIv2.OTMiddlePart)
             .And(SMIv2.OidAssignment)
             .Then(static x => new ConceptualTable(
-                x.Item1, x.Item4, x.Item2, x.Item3.Item1, x.Item3.Item2))
+                x.Item1, x.Item4, x.Item2, x.Item3.Item1, x.Item3.Item2, x.Item3.Item3))
             .WithName("ConceptualTable");
 }
 
@@ -495,8 +499,9 @@ public class ConceptualRow(
     AstType entryType,
     SMIv2Accessibility accessibility,
     SMIv2Status status,
+    TextSpan? description,
     IReadOnlyList<(TextSpan Name, bool IsImplied)> index
-) : ObjectType(name, oid, accessibility, status) {
+) : ObjectType(name, oid, accessibility, status, description) {
     public AstType EntryType { get; } = entryType;
     public IReadOnlyList<(TextSpan Name, bool IsImplied)> Index { get; } = index;
 
@@ -533,7 +538,7 @@ public class ConceptualRow(
             .And(OTIndexPart)
             .And(SMIv2.OidAssignment)
             .Then(static x => new ConceptualRow(
-                x.Item1, x.Item5, x.Item2, x.Item3.Item1, x.Item3.Item2, x.Item4))
+                x.Item1, x.Item5, x.Item2, x.Item3.Item1, x.Item3.Item2, x.Item3.Item3, x.Item4))
             .WithName("ConceptualRow");
 }
 
@@ -546,8 +551,9 @@ public class AugmentingConceptualRow(
     AstType entryType,
     SMIv2Accessibility accessibility,
     SMIv2Status status,
+    TextSpan? description,
     TextSpan augments
-) : ObjectType(name, oid, accessibility, status) {
+) : ObjectType(name, oid, accessibility, status, description) {
     public AstType EntryType { get; } = entryType;
     public TextSpan Augments { get; } = augments;
 
@@ -571,7 +577,7 @@ public class AugmentingConceptualRow(
             .And(OTAugmentsPart)
             .And(SMIv2.OidAssignment)
             .Then(static x => new AugmentingConceptualRow(
-                x.Item1, x.Item5, x.Item2, x.Item3.Item1, x.Item3.Item2, x.Item4))
+                x.Item1, x.Item5, x.Item2, x.Item3.Item1, x.Item3.Item2, x.Item3.Item3, x.Item4))
             .WithName("AugmentingConceptualRow");
 }
 
@@ -581,8 +587,9 @@ public class LeafObject(
     UnresolvedOid oid,
     AstType syntax,
     SMIv2Accessibility accessibility,
-    SMIv2Status status
-) : ObjectType(name, oid, accessibility, status) {
+    SMIv2Status status,
+    TextSpan? description
+) : ObjectType(name, oid, accessibility, status, description) {
     public AstType Syntax { get; } = syntax;
 
     // This is simply ignored
@@ -609,7 +616,7 @@ public class LeafObject(
             .AndSkip(OTDefValPart.ZeroOrOne())
             .And(SMIv2.OidAssignment)
             .Then(static x => new LeafObject(
-                x.Item1, x.Item4, x.Item2, x.Item3.Item1, x.Item3.Item2))
+                x.Item1, x.Item4, x.Item2, x.Item3.Item1, x.Item3.Item2, x.Item3.Item3))
             .WithName("LeafObject");
 }
 

@@ -199,6 +199,19 @@ class ParseTestCase<T>(string Name, Parser<T> Parser, string ToParse) : ParseTes
 
 public class ParsingTests
 {
+    private static Dictionary<string, Ast.ModuleDefinition> LoadAllAsts()
+    {
+        var asts = new Dictionary<string, Ast.ModuleDefinition>();
+        foreach (var mibFile in Directory.GetFiles(AppContext.BaseDirectory, "*.mib"))
+        {
+            var contents = File.ReadAllText(mibFile);
+            var ast = MibParser.ParseAst(contents, Path.GetFileName(mibFile));
+            asts[ast.Identifier.ToString()] = ast;
+        }
+
+        return asts;
+    }
+
     [Test]
     //[Arguments("TEST.mib")]
     [Arguments("IANAifType-MIB.mib", "IF-MIB.mib", "WESTERMO-OID-MIB.mib", "WESTERMO-INTERFACE-MIB.mib")]
@@ -235,6 +248,76 @@ public class ParsingTests
 
         await Assert.That(table.Columns.Any(x => x.Ident.Oid[^1] == 4)).IsTrue();
         await Assert.That(table.Columns.Any(x => x.Ident.Oid[^1] == 3)).IsFalse();
+    }
+
+    [Test]
+    public async Task QBridgeObjectTypeDescriptions_ArePreservedInAst()
+    {
+        var asts = LoadAllAsts();
+        var module = asts["Q-BRIDGE-MIB"];
+
+        var table = module.Items.OfType<ConceptualTable>()
+            .Single(x => x.Name.ToString() == "dot1qVlanStaticTable");
+        var row = module.Items.OfType<ConceptualRow>()
+            .Single(x => x.Name.ToString() == "dot1qVlanStaticEntry");
+        var augmentingRow = module.Items.OfType<AugmentingConceptualRow>()
+            .Single(x => x.Name.ToString() == "dot1qPortVlanEntry");
+        var leaf = module.Items.OfType<LeafObject>()
+            .Single(x => x.Name.ToString() == "dot1qVlanStaticName");
+
+        await Assert.That(table.Description?.ToString()).IsEqualTo("""
+A table containing static configuration information for
+        each VLAN configured into the device by (local or
+        network) management.  All entries are permanent and will
+        be restored after the device is reset.
+""");
+        await Assert.That(row.Description?.ToString()).IsEqualTo("""
+Static information for a VLAN configured into the
+        device by (local or network) management.
+""");
+        await Assert.That(augmentingRow.Description?.ToString()).IsEqualTo("""
+Information controlling VLAN configuration for a port
+        on the device.  This is indexed by dot1dBasePort.
+""");
+        await Assert.That(leaf.Description?.ToString()).IsEqualTo("""
+An administratively assigned string, which may be used
+        to identify the VLAN.
+""");
+    }
+
+    [Test]
+    public async Task QBridgeDescriptions_ArePropagatedToResolvedItems()
+    {
+        var modules = MibParser.ParseModules(LoadAllAsts());
+        var module = modules["Q-BRIDGE-MIB"];
+
+        var standaloneLeaf = module.Items.Values.OfType<MibLeaf>()
+            .Single(x => x.Ident.Name == "dot1qVlanNumDeletes");
+        var table = module.Items.Values.OfType<MibTable>()
+            .Single(x => x.Ident.Name == "dot1qVlanStaticTable");
+        var column = module.AllItems.Values.OfType<MibLeaf>()
+            .Single(x => x.Ident.Name == "dot1qVlanStaticName");
+
+        await Assert.That(standaloneLeaf.Description).IsEqualTo("""
+The number of times a VLAN entry has been deleted from
+        the dot1qVlanCurrentTable (for any reason).  If an entry
+        is deleted, then inserted, and then deleted, this
+        counter will be incremented by 2.
+""");
+        await Assert.That(table.Description).IsEqualTo("""
+A table containing static configuration information for
+        each VLAN configured into the device by (local or
+        network) management.  All entries are permanent and will
+        be restored after the device is reset.
+""");
+        await Assert.That(table.EntryDescription).IsEqualTo("""
+Static information for a VLAN configured into the
+        device by (local or network) management.
+""");
+        await Assert.That(column.Description).IsEqualTo("""
+An administratively assigned string, which may be used
+        to identify the VLAN.
+""");
     }
 
     [Test]

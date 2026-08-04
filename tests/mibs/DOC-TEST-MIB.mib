@@ -1,0 +1,49 @@
+DOC-TEST-MIB DEFINITIONS ::= BEGIN
+
+docTest OBJECT IDENTIFIER ::= { iso 9999 }
+
+customTable OBJECT-TYPE
+    SYNTAX      SEQUENCE OF CustomEntry
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION
+        "Table description"
+    ::= { docTest 1 }
+
+customEntry OBJECT-TYPE
+    SYNTAX      CustomEntry
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION
+        "Row description"
+    INDEX       { customIndex }
+    ::= { customTable 1 }
+
+CustomEntry ::= SEQUENCE {
+    customIndex Integer32,
+    customValue Integer32
+}
+
+customIndex OBJECT-TYPE
+    SYNTAX      Integer32
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION
+        "Index line 1
+         <tag> & value
+
+             deeper"
+    ::= { customEntry 1 }
+
+customValue OBJECT-TYPE
+    SYNTAX      Integer32
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION
+        "Column line 1
+         <tag> & value
+
+             deeper"
+    ::= { customEntry 2 }
+
+END

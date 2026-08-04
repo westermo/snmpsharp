@@ -72,32 +72,47 @@ public readonly struct MibTableIndex(MibLeaf leaf, bool isImplied = false) : IEq
     public override int GetHashCode() => HashCode.Combine(Leaf, IsImplied);
 }
 
-public class MibTable(MibItemIdent ident, MibTableIndex[] index, MibLeaf[] columns) : MibValuedItem(ident)
+public class MibTable(
+    MibItemIdent ident,
+    MibTableIndex[] index,
+    MibLeaf[] columns,
+    string? description = null,
+    string? entryDescription = null) : MibValuedItem(ident)
 {
     public readonly MibTableIndex[] Index = index;
     public readonly MibLeaf[] Columns = columns;
+    public readonly string? Description = description;
+    public readonly string? EntryDescription = entryDescription;
 
     public override bool Equals(MibItem? other)
     {
         if (other is not MibTable o) { return false; }
         return Ident.Equals(o.Ident)
             && Index.SequenceEqual(o.Index)
-            && Columns.SequenceEqual(o.Columns);
+            && Columns.SequenceEqual(o.Columns)
+            && Description == o.Description
+            && EntryDescription == o.EntryDescription;
     }
-    public override int GetHashCode() => HashCode.Combine(base.GetHashCode(), Index.SequenceHash(), Columns.SequenceHash());
+    public override int GetHashCode() => HashCode.Combine(
+        base.GetHashCode(),
+        Index.SequenceHash(),
+        Columns.SequenceHash(),
+        HashCode.Combine(Description, EntryDescription));
 }
 
-public class MibLeaf(MibItemIdent ident, MibType type, SMIv2Accessibility accessibility) : MibValuedItem(ident)
+public class MibLeaf(MibItemIdent ident, MibType type, SMIv2Accessibility accessibility, string? description = null) : MibValuedItem(ident)
 {
     public readonly MibType Type = type;
     public readonly SMIv2Accessibility Accessibility = accessibility;
+    public readonly string? Description = description;
 
     public override bool Equals(MibItem? other)
     {
         if (other is not MibLeaf o) { return false; }
         return Ident.Equals(o.Ident)
             && Type.Equals(o.Type)
-            && Accessibility == o.Accessibility;
+            && Accessibility == o.Accessibility
+            && Description == o.Description;
     }
-    public override int GetHashCode() => HashCode.Combine(base.GetHashCode(), Type, Accessibility);
+    public override int GetHashCode() => HashCode.Combine(base.GetHashCode(), Type, Accessibility, Description);
 }

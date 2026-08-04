@@ -182,7 +182,7 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
         foreach (var lo in module.Items.OfType<LeafObject>())
         {
             var oid = GetOid(lo.Name.ToString());
-            Items.Add(oid, new MibLeaf(oid, ResolveType(lo.Syntax), lo.Accessibility));
+            Items.Add(oid, new MibLeaf(oid, ResolveType(lo.Syntax), lo.Accessibility, lo.Description?.ToString()));
         }
 
         foreach (var table in module.Items.OfType<ConceptualTable>())
@@ -202,16 +202,19 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
 
             IReadOnlyList<(TextSpan Name, bool IsImplied)>? rowIndex = null;
             MibTableIndex[]? augmentsIndex = null;
+            string? entryDescription = null;
             if (rowAssigner is ConceptualRow row)
             {
                 if (table.EntryType.ToString() != row.EntryType.ToString() || table.Status != row.Status)
                     throw new Exception($"ConceptualTable({oid}) doesn't match ConceptualRow");
                 rowIndex = row.Index;
+                entryDescription = row.Description?.ToString();
             }
             else if (rowAssigner is AugmentingConceptualRow augRow)
             {
                 if (table.EntryType.ToString() != augRow.EntryType.ToString() || table.Status != augRow.Status)
                     throw new Exception($"ConceptualTable({oid}) doesn't match AugmentingConceptualRow");
+                entryDescription = augRow.Description?.ToString();
                 var baseRowName = augRow.Augments.ToString();
                 if (assignersByName.TryGetValue(baseRowName, out var _baseRow) && _baseRow is ConceptualRow baseRow)
                 {
@@ -264,7 +267,7 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
                     }
                     return col;
                 }).Where(c => c.Accessibility.CanRead());
-            Items.Add(oid, new MibTable(oid, [..index], [..columns]));
+            Items.Add(oid, new MibTable(oid, [..index], [..columns], table.Description?.ToString(), entryDescription));
         }
 
         // Snapshot all items before removing columns, so TryImport can still find them
