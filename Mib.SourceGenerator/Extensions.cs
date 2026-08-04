@@ -23,12 +23,17 @@ static class Extensions
     {
         public string EntryType()
         {
-            return $"{table.Ident.Name}Entry";
+            return $"{table.Ident.CSharpName()}Entry";
         }
         public string TableType()
         {
             return $"{table.EntryType()}[]";
         }
+    }
+
+    extension(MibItemIdent ident)
+    {
+        public string CSharpName() => OidTreeNaming.FormatIdentifier(ident.Name ?? "Unnamed");
     }
 
     extension(MibType type)

@@ -290,6 +290,12 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
     private readonly Dictionary<string, MibType> typedefsByName = [];
     private readonly Dictionary<MibItemIdent, MibItem> allItems = [];
 
+    /// <summary>All named OID arcs defined in this module, including pure OBJECT IDENTIFIER navigation nodes.</summary>
+    public IReadOnlyDictionary<string, MibItemIdent> AllOids => oidByName;
+
+    /// <summary>All resolved items including table columns (columns are removed from Items after construction).</summary>
+    public IReadOnlyDictionary<MibItemIdent, MibItem> AllItems => allItems;
+
     public bool TryImport(string name, out MibItem? item, out MibType? type)
     {
         item = null;

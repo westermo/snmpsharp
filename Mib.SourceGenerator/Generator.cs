@@ -4,7 +4,6 @@ using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.Text;
 
 namespace SnmpSharpNet.Mib.SourceGenerator;
 
@@ -15,11 +14,6 @@ public sealed class SnmpGenerator : IIncrementalGenerator
 {
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        context.RegisterPostInitializationOutput(i => {
-            i.AddEmbeddedAttributeDefinition();
-            i.AddSource("SnmpAttributes.Generated.cs", Templating.Attributes);
-        });
-
         var allMibs = context.AdditionalTextsProvider
             .Where(text => text.Path.EndsWith(".mib", StringComparison.OrdinalIgnoreCase))
             .Collect()
@@ -27,8 +21,16 @@ public sealed class SnmpGenerator : IIncrementalGenerator
             {
                 List<Diagnostic> errors = [];
 
-                var asts = texts
+                var defs = texts
                     .Select(text => GenMibDefinition.FromAdditionalText(text, ct))
+                    .ToList();
+
+                // Collect warnings from filename-mismatch cases before filtering errors
+                var warnings = defs
+                    .Where(d => d.Warnings is not null)
+                    .SelectMany(d => d.Warnings!);
+
+                var asts = defs
                     .Where(x => !x.CollectError(errors))
                     .ToDictionary(x => x.Name, x => x);
 
@@ -37,111 +39,38 @@ public sealed class SnmpGenerator : IIncrementalGenerator
                 {
                     errors.Add(modules.Diagnostic);
                 }
-            
-                return errors.Count > 0
-                    ? (null, errors.ToImmutableArray())
-                    : (new ValuedDictionary<string, MibModule>(modules.Value), null);
+
+                if (errors.Count > 0)
+                {
+                    return (null, errors.ToImmutableArray());
+                }
+
+                // Return warnings together with the successful result so they can be emitted
+                var allDiagnostics = warnings.ToImmutableArray();
+                return (new ValuedDictionary<string, MibModule>(modules.Value),
+                    allDiagnostics.Length > 0 ? allDiagnostics : null);
             });
 
-        var oidCarriers = context.SyntaxProvider
-            .ForAttributeWithMetadataName(
-                "SnmpSharpNet.Mib.Attributes.MibOidsAttribute",
-                (node, ct) => true,
-                (c, ct) => (PartialClass.FromSymbol(c.TargetSymbol), c.Attributes.SelectMany(ParseMibOidsAttribute).ToImmutableArray())
-            )
-            .Collect();
-
-        context.RegisterSourceOutput(allMibs.Combine(oidCarriers), (ctx, x) =>
+        context.RegisterSourceOutput(context.CompilationProvider.Combine(allMibs), (ctx, x) =>
         {
-            if (x.Left.Item2 is {} errors)
+            var compilation = x.Left;
+            var mibs = x.Right;
+
+            if (mibs.Item2 is {} diagnostics)
             {
-                foreach (var diag in errors)
+                foreach (var diag in diagnostics)
                 {
                     ctx.ReportDiagnostic(diag);
                 }
-                return;
+                // Abort on errors (warnings still reported above, module is null for errors)
+                if (mibs.Item1 is null) { return; }
             }
 
-            var unresolvedCarriers = x.Right;
-            var mibMods = x.Left.Item1!;
-
-            if (unresolvedCarriers.Length <= 0) { return; }
-            var carriers = unresolvedCarriers
-                .Select(carrier => GetRelevantItems(carrier.Item1.Location, carrier.Item2, mibMods).Select(items => (carrier.Item1, items)))
-                .ReportAll(ctx)
-                .Select(carrier => {
-                    return (carrier.Item1, carrier.items);
-                });
-            
-            foreach (var (decl, items) in carriers)
+            var tree = OidTreeBuilder.Build(mibs.Item1!);
+            foreach (var source in TreeTemplating.Generate(tree, compilation))
             {
-                ctx.AddSource($"{decl.TypeName}.Generated.cs",
-                    string.Join("\n", Templating.DataFile(decl, items))
-                );
+                ctx.AddSource(source.HintName, source.Source);
             }
         });
-    }
-
-    private static Result<ImmutableArray<MibItem>> GetRelevantItems(Location location, ImmutableArray<string> filters, Dictionary<string, MibModule> mibMods)
-    {
-        var items = new List<MibItem>();
-        foreach (var filter in filters)
-        {
-            var split = filter.Split(["::"], StringSplitOptions.None);
-            if (split.Length != 1 && split.Length != 2)
-            {
-                return Diagnostic.Create(
-                    Diagnostics.AttributeFilterError,
-                    location,
-                    $"'{filter}' is not a valid filter."
-                );
-            }
-
-            var moduleName = split[0];
-            if (!mibMods.TryGetValue(moduleName, out var module))
-            {
-                return Diagnostic.Create(Diagnostics.AttributeFilterError, location, $"Unknown module '{moduleName}'.");
-            }
-
-            if (split.Length == 1)
-            {
-                items.AddRange(module.Items.Values);
-            }
-            else
-            {
-                if (!module.TryImportObject(split[1], out var item))
-                {
-                    return Diagnostic.Create(Diagnostics.AttributeFilterError, location, $"Unknown item '{split[1]}' in '{moduleName}'.");
-                }
-                items.Add(item);
-            }
-        }
-
-        return items.ToImmutableArray();
-    }
-
-    private static IEnumerable<string> ParseMibOidsAttribute(AttributeData x)
-    {
-            if (x.ConstructorArguments.Length == 0)
-            {
-                return [];
-            }
-
-            var arg = x.ConstructorArguments[0];
-
-            if (arg.Kind == TypedConstantKind.Array)
-            {
-                return arg.Values
-                    .Select(v => v.Value as string)
-                    .Where(v => !string.IsNullOrWhiteSpace(v))
-                    .Select(v => v!);
-            }
-
-            if (arg.Value is string single && !string.IsNullOrWhiteSpace(single))
-            {
-                return [single];
-            }
-
-            return [];
     }
 }

@@ -16,11 +16,11 @@ internal static class Diagnostics
         category: "Design", DiagnosticSeverity.Error,
         isEnabledByDefault: true
     );
-    public static readonly DiagnosticDescriptor AttributeFilterError = new(
-        id: "SNMP003",
-        title: "Failed to apply MibOids filter",
+    public static readonly DiagnosticDescriptor FilenameMismatch = new(
+        id: "SNMP004",
+        title: "MIB filename does not match module identifier",
         messageFormat: "{0}",
-        category: "Design", DiagnosticSeverity.Error,
+        category: "Design", DiagnosticSeverity.Warning,
         isEnabledByDefault: true
     );
 }
