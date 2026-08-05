@@ -72,6 +72,16 @@ public class SourceGeneratorIntegrationTests
     }
 
     [Test]
+    public async Task GeneratedTableEntry_DeclaredAsObjectType_IsEmittedOnce()
+    {
+        var source = FindGeneratedSource(
+            "public class DuplicateTable : ISnmpTable<DuplicateTableEntry[]>");
+
+        await Assert.That(source.Split("public class DuplicateTableEntry", StringSplitOptions.None).Length)
+            .IsEqualTo(2);
+    }
+
+    [Test]
     public async Task GeneratedStandaloneLeaf_IncludesOidMarkerAndDescription()
     {
         var source = FindGeneratedSource("public class Dot1qVlanNumDeletes : IBranchIdentifier")

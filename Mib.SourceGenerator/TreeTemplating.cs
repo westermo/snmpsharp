@@ -159,7 +159,9 @@ internal static class TreeTemplating
 
         lines.Add("\t}");
         lines.AddRange(Templating.TableEntry("public", table));
-        foreach (var child in node.Children.Values.OrderBy(child => child.Arc))
+        foreach (var child in node.Children.Values
+                     .Where(child => OidTreeNaming.TypeName(child) != table.EntryType())
+                     .OrderBy(child => child.Arc))
         {
             lines.Add("");
             lines.AddRange(NestedNode(child, $"{name}.Oid"));

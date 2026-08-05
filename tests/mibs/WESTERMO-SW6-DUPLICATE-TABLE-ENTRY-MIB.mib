@@ -1,0 +1,43 @@
+WESTERMO-SW6-DUPLICATE-TABLE-ENTRY-MIB DEFINITIONS ::= BEGIN
+
+duplicateTableRoot OBJECT IDENTIFIER ::= { iso 9998 }
+
+duplicateTable OBJECT-TYPE
+    SYNTAX      SEQUENCE OF DuplicateTableEntry
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION
+        "A table that reproduces a separately registered entry node."
+    ::= { duplicateTableRoot 1 }
+
+duplicateTableEntry OBJECT-TYPE
+    SYNTAX      DuplicateTableEntry
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION
+        "A table entry."
+    INDEX       { duplicateTableIndex }
+    ::= { duplicateTable 1 }
+
+DuplicateTableEntry ::= SEQUENCE {
+    duplicateTableIndex Integer32,
+    duplicateTableValue Integer32
+}
+
+duplicateTableIndex OBJECT-TYPE
+    SYNTAX      Integer32
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION
+        "The table index."
+    ::= { duplicateTableEntry 1 }
+
+duplicateTableValue OBJECT-TYPE
+    SYNTAX      Integer32
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION
+        "The table value."
+    ::= { duplicateTableEntry 2 }
+
+END
