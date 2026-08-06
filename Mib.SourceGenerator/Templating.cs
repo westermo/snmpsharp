@@ -26,7 +26,7 @@ public static class Templating
         ];
     }
 
-    public static string[] TableEntry(string accessibility, MibTable table)
+    public static string[] TableEntry(string accessibility, MibTable table, string ns)
     {
         var typeName = table.EntryType();
         var strip = typeName.Replace("TableEntry", string.Empty);
@@ -38,8 +38,9 @@ public static class Templating
             Attribute,
             $"{accessibility} class {typeName} : ISnmpTableEntry<{typeName}>",
             "{",
-            $"\tpublic static Oid Root => field ??= {table.Ident.AsLiteral()};",
-            $"\tpublic static string TableName => \"{typeName.Replace("Entry", string.Empty)}\";",
+            $"\tpublic static Oid Oid => field ??= {table.Ident.AsLiteral()};",
+            $"\tpublic static string BranchName => \"{typeName}\";",
+            $"\tpublic static string FullBranchName => \"{ns}\";",
             .. table.Index.SelectMany((idx, i) => (string[])
             [
                 "",
@@ -54,18 +55,14 @@ public static class Templating
                 $"public required {col.Type.AsAsnType()} {col.Ident.CSharpName(strip)};",
             ]).Indent(),
             "",
-            .. EntryFromValues(table).Indent(),
+            .. IndexedParse(table).Indent(),
             "",
-            .. TableFromValues(table).Indent(),
-            "",
-            .. EntryToValues(table).Indent(),
-            "",
-            .. TableToValues(table).Indent(),
+            .. Populate(table).Indent(),
             "}"
         ];
     }
 
-    public static string[] EntryFromValues(MibTable table)
+    public static string[] IndexedParse(MibTable table)
     {
         var typeName = table.EntryType();
         var strip = typeName.Replace("TableEntry", string.Empty);
@@ -100,7 +97,7 @@ public static class Templating
 
         return
         [
-            $"public static {typeName}? EntryFromValues(ReadOnlySpan<uint> index, IReadOnlyDictionary<uint, AsnType> values)",
+            $"public static {typeName}? Parse(ReadOnlySpan<uint> index, IReadOnlyDictionary<uint, AsnType> values)",
             "{",
             .. indexPart.Indent(),
             "",
@@ -124,50 +121,7 @@ public static class Templating
         ];
     }
 
-    public static string[] TableFromValues(MibTable table)
-    {
-        var typeName = table.EntryType();
-        var hasVariableLengthIndex = table.Index.Any(x => x.Type.UintCount is null);
-        // For fixed-length indexes we can compute the exact expected OID depth.
-        // For variable-length indexes (OctetString, OID, etc.) the depth varies
-        // per row, so we only require that the OID is longer than entry+column.
-        var depthCheck = hasVariableLengthIndex
-            ? "\tvar minDepth = entryDepth + 2;" // at least column + 1 index component
-            : $"\tvar minDepth = entryDepth + 1 + {table.Index.Sum(x => x.Type.UintCount!.Value)};";
-
-        return
-        [
-            $"public static {table.TableType()} TableFromValues(IReadOnlyDictionary<Oid, AsnType> values)",
-            "{",
-            "\t// OID layout: Root.1.<column>.<index...>",
-            "\tvar entryDepth = Root.Length + 1;",
-            depthCheck,
-            "\tvar relevantValues = values",
-            "\t\t.Where(kv => kv.Key.Length >= minDepth && Root.IsRootOf(kv.Key));",
-            "",
-            "\tvar entries = new Dictionary<Oid, Dictionary<uint, AsnType>>();",
-            "",
-            "\tforeach (var kv in relevantValues)",
-            "\t{",
-            "\t\tvar path = kv.Key.ToArray();",
-            "\t\tvar column = path[entryDepth];",
-            "\t\tvar index = new Oid(path[(entryDepth + 1)..]);",
-            "\t\tif (!entries.ContainsKey(index))",
-            "\t\t{",
-            "\t\t\tentries[index] = new();",
-            "\t\t}",
-            "\t\tentries[index].Add(column, kv.Value);",
-            "\t}",
-            "",
-            "\treturn entries",
-            "\t\t.Select(x => EntryFromValues((uint[])x.Key, x.Value))",
-            $"\t\t.OfType<{typeName}>()",
-            "\t\t.ToArray();",
-            "}"
-        ];
-    }
-
-    public static string[] EntryToValues(MibTable table)
+    public static string[] Populate(MibTable table)
     {
         var typeName = table.EntryType();
         var strip = typeName.Replace("TableEntry", string.Empty);
@@ -196,32 +150,13 @@ public static class Templating
 
         return
         [
-            "public IDictionary<Oid, AsnType> EntryToValues()",
+            "public void Populate(IDictionary<Oid, AsnType> result)",
             "{",
             "\tvar indexOid = new List<uint>();",
             .. indexParts.Indent(),
-            "\tvar result = new Dictionary<Oid, AsnType>();",
             .. table.Columns.Select(col =>
-                $"\tresult[new Oid((uint[])[..Root, 1, {col.Ident.Oid.Last()}, ..indexOid])] = {col.Ident.CSharpName(strip)};"
+                $"\tresult[new Oid((uint[])[..Oid, 1, {col.Ident.Oid.Last()}, ..indexOid])] = {col.Ident.CSharpName(strip)};"
             ),
-            "\treturn result;",
-            "}"
-        ];
-    }
-
-    public static string[] TableToValues(MibTable table)
-    {
-        return
-        [
-            $"public static IDictionary<Oid, AsnType> TableToValues({table.TableType()} entries)",
-            "{",
-            "\tvar result = new Dictionary<Oid, AsnType>();",
-            "\tforeach (var entry in entries)",
-            "\t{",
-            "\t\tforeach (var kv in entry.EntryToValues())",
-            "\t\t\tresult[kv.Key] = kv.Value;",
-            "\t}",
-            "\treturn result;",
             "}"
         ];
     }

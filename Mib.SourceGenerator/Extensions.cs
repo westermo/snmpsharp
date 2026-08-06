@@ -27,7 +27,7 @@ internal static class Extensions
 
         public string TableType()
         {
-            return $"{table.EntryType()}[]";
+            return $"{table.EntryType()}";
         }
     }
 

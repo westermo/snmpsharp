@@ -1,8 +1,6 @@
 namespace SnmpSharpNet;
 
-public interface IBranchIdentifier
+public interface IBranchIdentifier : ISnmpNode
 {
-    static abstract Oid Oid { get; }
-    static abstract string BranchName { get; }
     static abstract string FullBranchName { get; }
 }

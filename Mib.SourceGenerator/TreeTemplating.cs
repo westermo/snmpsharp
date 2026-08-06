@@ -131,7 +131,7 @@ internal static class TreeTemplating
         }
 
         lines.Add(
-            $"\t\tpublic static {leaf.Type.AsAsnType()}? Get(AsnType value) => value as {leaf.Type.AsAsnType()};");
+            $"\t\tpublic static {leaf.Type.AsAsnType()}? Parse(IReadOnlyDictionary<Oid, AsnType> values) => values.TryGetValue(InstanceOid, out var value) ? value  as {leaf.Type.AsAsnType()} : null;");
         lines.Add("\t}");
         lines.Add("}");
         return [.. lines];
@@ -158,15 +158,15 @@ internal static class TreeTemplating
                 oid,
                 table.Description).Indent(),
             $"\t{Templating.Attribute}",
-            $"\tpublic class {name} : ISnmpTable<{table.TableType()}>",
+            $"\tpublic class {name} : List<{table.EntryType()}>, ISnmpTable<{name},{table.EntryType()}>",
             "\t{",
             .. BranchIdentifier(node, name, @namespace),
             "",
-            $"\t\tpublic static {table.TableType()} FromValues(IReadOnlyDictionary<Oid, AsnType> values) => {table.EntryType()}.TableFromValues(values);",
-            $"\t\tpublic static IDictionary<Oid, AsnType> ToValues({table.TableType()} entries) => {table.EntryType()}.TableToValues(entries);",
+            .. Parse(table, name).Indent().Indent(),
+            .. Populate().Indent().Indent(),
             "",
             "\t}",
-            .. Templating.TableEntry("public", table).Indent()
+            .. Templating.TableEntry("public", table, @namespace).Indent()
         ];
 
 
@@ -181,6 +181,64 @@ internal static class TreeTemplating
         lines.Add("}");
         return [.. lines];
     }
+
+    private static string[] Populate()
+    {
+        return
+        [
+            $"public void Populate(IDictionary<Oid, AsnType> result)",
+            "{",
+            "\tforeach (var entry in this)",
+            "\t{",
+            "\t\tentry.Populate(result);",
+            "\t}",
+            "}"
+        ];
+    }
+
+    public static string[] Parse(MibTable table, string name)
+    {
+        var typeName = table.EntryType();
+        var hasVariableLengthIndex = table.Index.Any(x => x.Type.UintCount is null);
+        // For fixed-length indexes we can compute the exact expected OID depth.
+        // For variable-length indexes (OctetString, OID, etc.) the depth varies
+        // per row, so we only require that the OID is longer than entry+column.
+        var depthCheck = hasVariableLengthIndex
+            ? "\tvar minDepth = entryDepth + 2;" // at least column + 1 index component
+            : $"\tvar minDepth = entryDepth + 1 + {table.Index.Sum(x => x.Type.UintCount!.Value)};";
+
+        return
+        [
+            $"public static {name}? Parse(IReadOnlyDictionary<Oid, AsnType> values)",
+            "{",
+            "\t// OID layout: Oid.1.<column>.<index...>",
+            "\tvar entryDepth = Oid.Length + 1;",
+            depthCheck,
+            "\tvar relevantValues = values",
+            "\t\t.Where(kv => kv.Key.Length >= minDepth && Oid.IsRootOf(kv.Key));",
+            "",
+            "\tvar entries = new Dictionary<Oid, Dictionary<uint, AsnType>>();",
+            "",
+            "\tforeach (var kv in relevantValues)",
+            "\t{",
+            "\t\tvar path = kv.Key.ToArray();",
+            "\t\tvar column = path[entryDepth];",
+            "\t\tvar index = new Oid(path[(entryDepth + 1)..]);",
+            "\t\tif (!entries.ContainsKey(index))",
+            "\t\t{",
+            "\t\t\tentries[index] = new();",
+            "\t\t}",
+            "\t\tentries[index].Add(column, kv.Value);",
+            "\t}",
+            "",
+            $"\treturn [..",
+            $"\t\tentries.Select(x => {typeName}.Parse((uint[])x.Key, x.Value))",
+            $"\t\t.OfType<{typeName}>()",
+            "\t\t];",
+            "}"
+        ];
+    }
+
 
     private static IEnumerable<string[]> NotificationHelpers(OidTreeNode node)
     {
@@ -215,7 +273,7 @@ internal static class TreeTemplating
             {
                 $"if(values.ContainsKey({child}.Oid))",
                 "{",
-                $"\t if({child}.FromValues(values) is {{}} parsed) yield return parsed;",
+                $"\t if({child}.Parse(values) is {{}} parsed) yield return parsed;",
                 "}"
             }.Indent()),
             .. namespaces.SelectMany(ns => new[]
@@ -257,7 +315,7 @@ internal static class TreeTemplating
         if (node.Item is MibLeaf leaf)
         {
             yield return
-                $"\tpublic static {leaf.Type.AsAsnType()}? Get(AsnType value) => value as {leaf.Type.AsAsnType()};";
+                $"\tpublic static {leaf.Type.AsAsnType()}? Parse(IReadOnlyDictionary<Oid, AsnType> values) => values.TryGetValue(Oid, out var value) ? value  as {leaf.Type.AsAsnType()} : null;";
         }
 
         foreach (var child in node.Children.Values.OrderBy(child => child.Arc))
@@ -296,7 +354,7 @@ internal static class TreeTemplating
             .. notification.Objects.Select(obj =>
                 $"\t\tprivate static Oid {obj.Ident.CSharpName(name)}Id = {obj.Ident.AsLiteral()}; "),
 
-            $"\t\tpublic static {name}? FromValues(IReadOnlyDictionary<Oid, AsnType> values)",
+            $"\t\tpublic static {name}? Parse(IReadOnlyDictionary<Oid, AsnType> values)",
             "\t\t{",
             .. notification.Objects.Select(obj =>
             {
@@ -315,16 +373,14 @@ internal static class TreeTemplating
             }),
             "\t\t\t};",
             "\t\t}",
-            "\t\tpublic IDictionary<Oid, AsnType> ToValues()",
+            "\t\tpublic void Populate(IDictionary<Oid, AsnType> values)",
             "\t\t{",
-            "\t\t\tvar values = new Dictionary<Oid, AsnType>();",
             "\t\t\tvalues[Oid] = new Integer32(0);",
             .. notification.Objects.Select(obj =>
             {
                 var objName = obj.Ident.CSharpName(name);
                 return $"\t\t\tvalues[{objName}Id] = {objName};";
             }),
-            "\t\t\treturn values;",
             "\t\t}",
             "",
             "\t}",
