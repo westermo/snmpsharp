@@ -38,8 +38,14 @@ internal static class TreeTemplating
             var valueTypeName = $"{parentNamespace}.{name}";
             if (emitted.Add(valueTypeName) && compilation.GetTypeByMetadataName(valueTypeName) is null)
             {
+                var folder = node.Item switch
+                {
+                    MibTable => "Tables",
+                    MibNotification => "Notifications",
+                    _ => "Leafs"
+                };
                 yield return new GeneratedSource(
-                    HintName(parentNamespace, name, name.Contains("Table") ? "Tables" : "Leafs"),
+                    HintName(parentNamespace, name, folder),
                     string.Join("\n", ValueType(parentNamespace, name, node)));
             }
         }
@@ -68,6 +74,7 @@ internal static class TreeTemplating
     {
         yield return "#nullable enable";
         yield return "using SnmpSharpNet;";
+        yield return "using System.Collections.Generic;";
         yield return "using System.CodeDom.Compiler;";
     }
 
@@ -82,6 +89,7 @@ internal static class TreeTemplating
         "\tpublic class Id : IBranchIdentifier",
         "\t{",
         .. BranchIdentifier(node, name, @namespace),
+        .. NotificationHelpers(node).SelectMany(static lines => lines.Prepend(string.Empty)).Indent().Indent(),
         "\t}",
         "}"
     ];
@@ -92,6 +100,7 @@ internal static class TreeTemplating
         {
             MibLeaf leaf => LeafType(@namespace, name, node, leaf),
             MibTable table => TableType(@namespace, name, node, table),
+            MibNotification notification => NotificationType(@namespace, name, node, notification),
             _ => throw new InvalidOperationException($"OID node '{name}' has no value type.")
         };
     }
@@ -173,6 +182,55 @@ internal static class TreeTemplating
         return [.. lines];
     }
 
+    private static IEnumerable<string[]> NotificationHelpers(OidTreeNode node)
+    {
+        var directDescendants = node.Children.Select(s => s.Value).ToArray();
+        var notifications = directDescendants
+            .Where(child => child.IsNotification)
+            .OrderBy(DotForm, StringComparer.Ordinal)
+            .ToArray();
+        var namespaces = directDescendants.Where(child => child.IsNamespace)
+            .Where(child => Descendants(child).Any(s => s.IsNotification))
+            .OrderBy(DotForm, StringComparer.Ordinal)
+            .ToArray();
+        var notificationTypeNames = notifications.Select(child =>
+            $"global::{OidTreeNaming.NamespaceFor(child.Parent!)}.{OidTreeNaming.TypeName(child)}").ToArray();
+        yield return
+        [
+            "public static IEnumerable<Oid> EnumerateNotifications()",
+            "{",
+            .. notificationTypeNames.Select(type =>
+                $"\tyield return {type}.Oid;"),
+            .. namespaces.Select(ns =>
+                $"\tforeach(var oid in global::{OidTreeNaming.NamespaceFor(ns)}.Id.EnumerateNotifications()) yield return oid;"),
+            "\tyield break;",
+            "}"
+        ];
+
+        yield return
+        [
+            "public static IEnumerable<object> ParseNotifications(IReadOnlyDictionary<Oid, AsnType> values)",
+            "{",
+            .. notificationTypeNames.SelectMany(child => new[]
+            {
+                $"if(values.ContainsKey({child}.Oid))",
+                "{",
+                $"\t if({child}.FromValues(values) is {{}} parsed) yield return parsed;",
+                "}"
+            }.Indent()),
+            .. namespaces.SelectMany(ns => new[]
+            {
+                $"foreach(var parsed in global::{OidTreeNaming.NamespaceFor(ns)}.Id.ParseNotifications(values))",
+                "{",
+                "\tyield return parsed;",
+                "}"
+            }.Indent()),
+            "",
+            "\tyield break;",
+            "}"
+        ];
+    }
+
     private static IEnumerable<string> NestedNode(OidTreeNode node, string parentOid)
     {
         var name = OidTreeNaming.TypeName(node);
@@ -212,6 +270,66 @@ internal static class TreeTemplating
         }
 
         yield return "}";
+    }
+
+    private static string[] NotificationType(string @namespace, string name, OidTreeNode node,
+        MibNotification notification)
+    {
+        var oid = DotForm(node);
+
+
+        return
+        [
+            .. CommonUsings(),
+            "",
+            $"namespace {@namespace}",
+            "{",
+            .. Templating.DocComment(
+                oid,
+                notification.Description).Indent(),
+            $"\t{Templating.Attribute}",
+            $"\tpublic class {name} : ISnmpNotification<{name}>",
+            "\t{",
+            .. BranchIdentifier(node, name, @namespace),
+            .. notification.Objects.Select(obj =>
+                $"\t\tpublic required {obj.Type.AsAsnType()} {obj.Ident.CSharpName(name)}; "),
+            .. notification.Objects.Select(obj =>
+                $"\t\tprivate static Oid {obj.Ident.CSharpName(name)}Id = {obj.Ident.AsLiteral()}; "),
+
+            $"\t\tpublic static {name}? FromValues(IReadOnlyDictionary<Oid, AsnType> values)",
+            "\t\t{",
+            .. notification.Objects.Select(obj =>
+            {
+                var objName = obj.Ident.CSharpName(name);
+                var lName = objName.Replace(objName[0], char.ToLower(objName[0]));
+                return
+                    $"\t\t\tif(!values.TryGetValue({objName}Id, out var _{lName}) || _{lName} is not {obj.Type.AsAsnType()} {lName}) return null;";
+            }),
+            $"\t\t\treturn new {name}(){{",
+            .. notification.Objects.Select(obj =>
+            {
+                var objName = obj.Ident.CSharpName(name);
+                var lName = objName.Replace(objName[0], char.ToLower(objName[0]));
+                return
+                    $"\t\t\t\t{objName} = {lName},";
+            }),
+            "\t\t\t};",
+            "\t\t}",
+            "\t\tpublic IDictionary<Oid, AsnType> ToValues()",
+            "\t\t{",
+            "\t\t\tvar values = new Dictionary<Oid, AsnType>();",
+            "\t\t\tvalues[Oid] = new Integer32(0);",
+            .. notification.Objects.Select(obj =>
+            {
+                var objName = obj.Ident.CSharpName(name);
+                return $"\t\t\tvalues[{objName}Id] = {objName};";
+            }),
+            "\t\t\treturn values;",
+            "\t\t}",
+            "",
+            "\t}",
+            "}"
+        ];
     }
 
     private static string OidExpression(OidTreeNode node)

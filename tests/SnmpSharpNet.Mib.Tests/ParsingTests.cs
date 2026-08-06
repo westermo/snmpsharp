@@ -17,6 +17,7 @@ public abstract class ParseTestCase(string Name)
         yield return ConceptualTableAssignment;
         yield return ConceptualRowAssignment;
         yield return LeafObjectAssignment;
+        yield return NotificationTypeAssignment;
         yield return IgnoredObjectGroup;
         yield return IgnoredModuleCompliance;
     }
@@ -123,6 +124,20 @@ public abstract class ParseTestCase(string Name)
             DESCRIPTION
             "A unique value, greater than zero, for each interface."
             ::= { ifRefEntry 1 }
+        $
+        """
+    );
+
+    public static readonly ParseTestCase NotificationTypeAssignment = new ParseTestCase<ModuleItem>(
+        nameof(NotificationTypeAssignment),
+        ModuleItem.Parser,
+        """
+        linkDown NOTIFICATION-TYPE
+            OBJECTS { ifIndex, ifAdminStatus, ifOperStatus }
+            STATUS  current
+            DESCRIPTION
+                    "A linkDown trap."
+            ::= { snmpTraps 3 }
         $
         """
     );
@@ -318,6 +333,25 @@ Static information for a VLAN configured into the
 An administratively assigned string, which may be used
         to identify the VLAN.
 """);
+    }
+
+    [Test]
+    public async Task IfMibNotifications_ArePropagatedToResolvedItems()
+    {
+        var modules = MibParser.ParseModules(LoadAllAsts());
+        var module = modules["IF-MIB"];
+
+        var notification = module.Items.Values.OfType<MibNotification>()
+            .Single(x => x.Ident.Name == "linkDown");
+
+        await Assert.That(string.Join(",", notification.Objects.Select(x => x.Ident.Name)))
+            .IsEqualTo("ifIndex,ifAdminStatus,ifOperStatus");
+        await Assert.That(notification.Description?.StartsWith(
+            "A linkDown trap signifies that the SNMP entity, acting in",
+            StringComparison.Ordinal)).IsTrue();
+        await Assert.That(notification.Description?.Contains(
+            "of ifOperStatus.",
+            StringComparison.Ordinal)).IsTrue();
     }
 
     [Test]

@@ -116,3 +116,29 @@ public class MibLeaf(MibItemIdent ident, MibType type, SMIv2Accessibility access
     }
     public override int GetHashCode() => HashCode.Combine(base.GetHashCode(), Type, Accessibility, Description);
 }
+
+public class MibNotification(
+    MibItemIdent ident,
+    SMIv2Status status,
+    MibLeaf[] objects,
+    string? description = null) : MibItem(ident)
+{
+    public readonly SMIv2Status Status = status;
+    public readonly MibLeaf[] Objects = objects;
+    public readonly string? Description = description;
+
+    public override bool Equals(MibItem? other)
+    {
+        if (other is not MibNotification o) { return false; }
+        return Ident.Equals(o.Ident)
+            && Status == o.Status
+            && Objects.SequenceEqual(o.Objects)
+            && Description == o.Description;
+    }
+
+    public override int GetHashCode() => HashCode.Combine(
+        base.GetHashCode(),
+        Status,
+        Objects.SequenceHash(),
+        Description);
+}

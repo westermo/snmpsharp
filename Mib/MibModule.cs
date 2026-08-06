@@ -32,6 +32,7 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
             {
                 throw new Exception($"Failed to import '{fromModule}', no such importable");
             }
+
             var importedModule = importables[fromModule.ToString()];
             foreach (var symbol in symbols)
             {
@@ -40,10 +41,12 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
                 {
                     continue; // compliance/group names may not be resolvable
                 }
+
                 if (item is not null)
                 {
                     importedItems[symbolName] = item;
                 }
+
                 if (importedType is not null)
                 {
                     importedTypes[symbolName] = importedType;
@@ -52,7 +55,8 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
         }
 
         var externalOids = MibItemIdent.TopLevelArcs.ToDictionary(x => x.Key, x => x.Value);
-        foreach (var item in importedItems) {
+        foreach (var item in importedItems)
+        {
             externalOids.Add(item.Key, item.Value.Ident);
         }
 
@@ -67,31 +71,6 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
             .ToDictionary(x => x.Name.ToString(), x => x);
 
         var currentlyResolving = new HashSet<string>();
-        MibItemIdent GetOid(string name)
-        {
-            if (oidByName.TryGetValue(name, out var cached)) { return cached; }
-            if (externalOids.TryGetValue(name, out cached)) { return cached; }
-
-            if (!currentlyResolving.Add(name))
-            {
-                throw new Exception($"Identifier '{name}' is recursive");
-            }
-
-            if (!assignersByName.TryGetValue(name, out var item))
-            {
-                throw new Exception($"Identifier '{name}' is missing");
-            }
-
-            var parent = GetOid(item.Oid.Parent.ToString());
-            foreach (var (compName, compNumber) in item.Oid.Components)
-            {
-                parent = parent.Add((uint)compNumber, compName.ToString());
-            }
-            var resolved = parent.Add((uint)item.Oid.Oid, item.Name.ToString());
-            oidByName[name] = resolved;
-            itemByOid[resolved] = item;
-            return resolved;
-        }
 
         foreach (var item in assignersByName.Keys)
         {
@@ -107,6 +86,173 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
             .ToDictionary(x => x.Name.ToString(), x => x.Syntax);
 
         var typeResolutionStack = new HashSet<string>();
+
+        typedefsByName = module.Items
+            .OfType<TextualConvention>()
+            .ToDictionary(x => x.Name.ToString(), x => ResolveType(x.Syntax));
+
+        var entryTypes = module.Items
+            .OfType<EntryDef>()
+            .ToDictionary(x => x.Name.ToString(), x => x);
+
+        //
+        // Second pass:
+        // Resolve all items
+        //
+        foreach (var mi in module.Items.OfType<ModuleIdentity>())
+        {
+            var oid = GetOid(mi.Name.ToString());
+            Items.Add(oid, new MibModuleInfo(oid, mi));
+        }
+
+        foreach (var lo in module.Items.OfType<LeafObject>())
+        {
+            var oid = GetOid(lo.Name.ToString());
+            Items.Add(oid, new MibLeaf(oid, ResolveType(lo.Syntax), lo.Accessibility, lo.Description?.ToString()));
+        }
+
+        foreach (var table in module.Items.OfType<ConceptualTable>())
+        {
+            var oid = GetOid(table.Name.ToString());
+
+            if (!entryTypes.TryGetValue(table.EntryType.ToString(), out var entryDef))
+            {
+                throw new Exception($"ConceptualTable({oid.OidNames}): No such EntryType '{table.EntryType}'");
+            }
+
+            var rowOid = oid.Add(1, null);
+            if (!itemByOid.TryGetValue(rowOid, out var rowAssigner))
+            {
+                throw new Exception($"ConceptualTable({oid}): No item at .1");
+            }
+
+            IReadOnlyList<(TextSpan Name, bool IsImplied)>? rowIndex;
+            MibTableIndex[]? augmentsIndex = null;
+            string? entryDescription;
+            switch (rowAssigner)
+            {
+                case ConceptualRow row when table.EntryType.ToString() != row.EntryType.ToString() ||
+                                            table.Status != row.Status:
+                    throw new Exception($"ConceptualTable({oid}) doesn't match ConceptualRow");
+                case ConceptualRow row:
+                    rowIndex = row.Index;
+                    entryDescription = row.Description?.ToString();
+                    break;
+                case AugmentingConceptualRow augRow when table.EntryType.ToString() != augRow.EntryType.ToString() ||
+                                                         table.Status != augRow.Status:
+                    throw new Exception($"ConceptualTable({oid}) doesn't match AugmentingConceptualRow");
+                case AugmentingConceptualRow augRow:
+                {
+                    entryDescription = augRow.Description?.ToString();
+                    var baseRowName = augRow.Augments.ToString();
+                    if (assignersByName.TryGetValue(baseRowName, out var assigner) && assigner is ConceptualRow baseRow)
+                    {
+                        rowIndex = baseRow.Index;
+                    }
+                    else if (importedItems.TryGetValue(baseRowName, out var importedRow) &&
+                             importedRow is MibTable importedTable)
+                    {
+                        rowIndex = null;
+                        augmentsIndex = importedTable.Index;
+                    }
+                    else
+                    {
+                        throw new Exception($"ConceptualTable({oid}): AUGMENTS base row '{baseRowName}' not found");
+                    }
+
+                    break;
+                }
+                default:
+                    throw new Exception(
+                        $"ConceptualTable({oid}): .1 is not a ConceptualRow or AugmentingConceptualRow");
+            }
+
+            MibTableIndex[] index;
+            if (augmentsIndex is not null)
+            {
+                index = augmentsIndex;
+            }
+            else
+            {
+                index =
+                [
+                    .. rowIndex!
+                        .Select((entry, idx) =>
+                        {
+                            if (Items.TryGetValue(GetOid(entry.Name.ToString()), out var mibItem) &&
+                                mibItem is MibLeaf item)
+                            {
+                                return new MibTableIndex(item, entry.IsImplied);
+                            }
+
+                            if (importedItems.TryGetValue(entry.Name.ToString(), out mibItem) &&
+                                mibItem is MibLeaf imported)
+                            {
+                                return new MibTableIndex(imported, entry.IsImplied);
+                            }
+
+                            throw new Exception($"ConceptualTable({oid}): INDEX '{entry.Name}' is not a LeafObject");
+                        })
+                ];
+            }
+
+            var columns = entryDef.Fields
+                .Select(field =>
+                {
+                    var fieldName = field.name.ToString();
+                    var colOid = GetOid(fieldName);
+                    if (!Items.TryGetValue(colOid, out var _col) || _col is not MibLeaf col)
+                    {
+                        throw new Exception($"ConceptualTable({oid}): field '{field.name}' is not a LeafObject");
+                    }
+
+                    return col;
+                }).Where(c => c.Accessibility.CanRead());
+            Items.Add(oid,
+                new MibTable(oid, [.. index], [.. columns], table.Description?.ToString(), entryDescription));
+        }
+
+        foreach (var notification in module.Items.OfType<NotificationType>())
+        {
+            var oid = GetOid(notification.Name.ToString());
+            var objects = notification.Objects
+                .Select(obj =>
+                {
+                    var objectName = obj.ToString();
+                    if (Items.TryGetValue(GetOid(objectName), out var mibItem) && mibItem is MibLeaf item)
+                    {
+                        return item;
+                    }
+
+                    if (importedItems.TryGetValue(objectName, out mibItem) && mibItem is MibLeaf imported)
+                    {
+                        return imported;
+                    }
+
+                    throw new Exception(
+                        $"NotificationType({oid}): OBJECTS entry '{obj}' is not a LeafObject");
+                });
+
+            Items.Add(oid, new MibNotification(oid, notification.Status, [.. objects], notification.Description?.ToString()));
+        }
+
+        // Snapshot all items before removing columns, so TryImport can still find them
+        foreach (var kvp in Items)
+        {
+            allItems[kvp.Key] = kvp.Value;
+        }
+
+        foreach (var table in module.Items.OfType<ConceptualTable>())
+        {
+            var tableItem = (MibTable)Items[GetOid(table.Name.ToString())];
+            foreach (var item in tableItem.Columns)
+            {
+                Items.Remove(item.Ident);
+            }
+        }
+
+        return;
+
         MibType ResolveType(AstType type)
         {
             if (type.Kind is { } kind)
@@ -161,128 +307,33 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
             }
         }
 
-        typedefsByName = module.Items
-            .OfType<TextualConvention>()
-            .ToDictionary(x => x.Name.ToString(), x => ResolveType(x.Syntax));
-
-        var entryTypes = module.Items
-            .OfType<EntryDef>()
-            .ToDictionary(x => x.Name.ToString(), x => x);
-
-        //
-        // Second pass:
-        // Resolve all items
-        //
-        foreach (var mi in module.Items.OfType<ModuleIdentity>())
+        MibItemIdent GetOid(string name)
         {
-            var oid = GetOid(mi.Name.ToString());
-            Items.Add(oid, new MibModuleInfo(oid, mi));
-        }
-
-        foreach (var lo in module.Items.OfType<LeafObject>())
-        {
-            var oid = GetOid(lo.Name.ToString());
-            Items.Add(oid, new MibLeaf(oid, ResolveType(lo.Syntax), lo.Accessibility, lo.Description?.ToString()));
-        }
-
-        foreach (var table in module.Items.OfType<ConceptualTable>())
-        {
-            var oid = GetOid(table.Name.ToString());
-
-            if (!entryTypes.TryGetValue(table.EntryType.ToString(), out var entryDef))
+            if (oidByName.TryGetValue(name, out var cached) || externalOids.TryGetValue(name, out cached))
             {
-                throw new Exception($"ConceptualTable({oid.OidNames}): No such EntryType '{table.EntryType}'");
+                return cached;
             }
 
-            var rowOid = oid.Add(1, null);
-            if (!itemByOid.TryGetValue(rowOid, out var rowAssigner))
+            if (!currentlyResolving.Add(name))
             {
-                throw new Exception($"ConceptualTable({oid}): No item at .1");
+                throw new Exception($"Identifier '{name}' is recursive");
             }
 
-            IReadOnlyList<(TextSpan Name, bool IsImplied)>? rowIndex = null;
-            MibTableIndex[]? augmentsIndex = null;
-            string? entryDescription = null;
-            if (rowAssigner is ConceptualRow row)
+            if (!assignersByName.TryGetValue(name, out var item))
             {
-                if (table.EntryType.ToString() != row.EntryType.ToString() || table.Status != row.Status)
-                    throw new Exception($"ConceptualTable({oid}) doesn't match ConceptualRow");
-                rowIndex = row.Index;
-                entryDescription = row.Description?.ToString();
-            }
-            else if (rowAssigner is AugmentingConceptualRow augRow)
-            {
-                if (table.EntryType.ToString() != augRow.EntryType.ToString() || table.Status != augRow.Status)
-                    throw new Exception($"ConceptualTable({oid}) doesn't match AugmentingConceptualRow");
-                entryDescription = augRow.Description?.ToString();
-                var baseRowName = augRow.Augments.ToString();
-                if (assignersByName.TryGetValue(baseRowName, out var _baseRow) && _baseRow is ConceptualRow baseRow)
-                {
-                    rowIndex = baseRow.Index;
-                }
-                else if (importedItems.TryGetValue(baseRowName, out var importedRow) && importedRow is MibTable importedTable)
-                {
-                    rowIndex = null;
-                    augmentsIndex = importedTable.Index;
-                }
-                else
-                {
-                    throw new Exception($"ConceptualTable({oid}): AUGMENTS base row '{baseRowName}' not found");
-                }
-            }
-            else
-            {
-                throw new Exception($"ConceptualTable({oid}): .1 is not a ConceptualRow or AugmentingConceptualRow");
+                throw new Exception($"Identifier '{name}' is missing");
             }
 
-            MibTableIndex[] index;
-            if (augmentsIndex is not null)
+            var parent = GetOid(item.Oid.Parent.ToString());
+            foreach (var (compName, compNumber) in item.Oid.Components)
             {
-                index = augmentsIndex;
-            }
-            else
-            {
-                index = rowIndex!
-                    .Select((entry, idx) => {
-                        if (Items.TryGetValue(GetOid(entry.Name.ToString()), out var _item) && _item is MibLeaf item)
-                        {
-                            return new MibTableIndex(item, entry.IsImplied);
-                        }
-                        if (importedItems.TryGetValue(entry.Name.ToString(), out _item) && _item is MibLeaf imported)
-                        {
-                            return new MibTableIndex(imported, entry.IsImplied);
-                        }
-                        throw new Exception($"ConceptualTable({oid}): INDEX '{entry.Name}' is not a LeafObject");
-                    })
-                    .ToArray();
+                parent = parent.Add((uint)compNumber, compName.ToString());
             }
 
-            var columns = entryDef.Fields
-                .Select(field => {
-                    var fieldName = field.name.ToString();
-                    var colOid = GetOid(fieldName);
-                    if (!Items.TryGetValue(colOid, out var _col) || _col is not MibLeaf col)
-                    {
-                        throw new Exception($"ConceptualTable({oid}): field '{field.name}' is not a LeafObject");
-                    }
-                    return col;
-                }).Where(c => c.Accessibility.CanRead());
-            Items.Add(oid, new MibTable(oid, [..index], [..columns], table.Description?.ToString(), entryDescription));
-        }
-
-        // Snapshot all items before removing columns, so TryImport can still find them
-        foreach (var kvp in Items)
-        {
-            allItems[kvp.Key] = kvp.Value;
-        }
-
-        foreach (var table in module.Items.OfType<ConceptualTable>())
-        {
-            var tableItem = (MibTable)Items[GetOid(table.Name.ToString())];
-            foreach (var item in tableItem.Columns)
-            {
-                Items.Remove(item.Ident);
-            }
+            var resolved = parent.Add((uint)item.Oid.Oid, item.Name.ToString());
+            oidByName[name] = resolved;
+            itemByOid[resolved] = item;
+            return resolved;
         }
     }
 
@@ -321,6 +372,7 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
                 item = new MibItem(ident);
             }
         }
+
         var typed = typedefsByName.TryGetValue(name, out type);
         return valued || typed;
     }
@@ -342,7 +394,7 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
             switch (item)
             {
                 case MibModuleInfo mi:
-                    sb.AppendLine($" ::= ModuleInfo {{");
+                    sb.AppendLine(" ::= ModuleInfo {");
                     sb.AppendLine($"  LastUpdated: {mi.LastUpdated}");
                     sb.AppendLine($"  Organization: {mi.Organization}");
                     sb.AppendLine($"  ContactInfo: {mi.ContactInfo}");
@@ -351,20 +403,25 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
                     {
                         sb.AppendLine($"  Revision: {date} - {desc}");
                     }
-                    sb.AppendLine($"}}");
+
+                    sb.AppendLine("}");
                     break;
                 case MibLeaf leaf:
                     sb.AppendLine($" ::= {leaf.Type}");
                     break;
                 case MibTable table:
-                    sb.AppendLine($"[");
+                    sb.AppendLine("[");
                     sb.AppendLine($"  {string.Join(",\n  ", table.Index.Select(x => x.Type))}");
-                    sb.AppendLine($"] {{");
+                    sb.AppendLine("] {");
                     sb.AppendLine($"  {string.Join(",\n  ", table.Columns.Select(x => $"{x.Ident}: {x.Type}"))}");
-                    sb.AppendLine($"}}");
+                    sb.AppendLine("}");
+                    break;
+                case MibNotification notification:
+                    sb.AppendLine($" ::= Notification [{string.Join(", ", notification.Objects.Select(x => x.Ident.Name))}]");
                     break;
             }
         }
+
         return sb.ToString();
     }
 
@@ -377,11 +434,12 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
     }
 
     public override bool Equals(object? obj) => Equals(obj as MibModule);
+
     public override int GetHashCode()
     {
         unchecked
         {
-            int itemsHash = 0;
+            var itemsHash = 0;
             foreach (var kvp in Items)
                 itemsHash += HashCode.Combine(kvp.Key, kvp.Value);
             return HashCode.Combine(Identifier, itemsHash);

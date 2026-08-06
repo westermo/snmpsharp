@@ -6,6 +6,7 @@
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
         <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+        <IsAotCompatible>false</IsAotCompatible>
     </PropertyGroup>
 
     <ItemGroup>
@@ -22,7 +23,7 @@
 
     <ItemGroup>
         <AssemblyMetadata Include="CompilerGeneratedFilesOutputPath"
-                          Value="$([System.IO.Path]::GetFullPath('$(CompilerGeneratedFilesOutputPath)', '$(MSBuildProjectDirectory)'))" />
+                          Value="$([System.IO.Path]::GetFullPath('$(CompilerGeneratedFilesOutputPath)', '$(MSBuildProjectDirectory)'))"/>
     </ItemGroup>
 
 </Project>

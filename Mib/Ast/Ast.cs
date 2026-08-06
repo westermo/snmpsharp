@@ -430,10 +430,12 @@ public class NotificationType(
     TextSpan name,
     UnresolvedOid oid,
     SMIv2Status status,
-    IReadOnlyList<TextSpan> objects
+    IReadOnlyList<TextSpan> objects,
+    TextSpan? description
 ) : OidAssigner(name, oid) {
     public SMIv2Status Status { get; } = status;
     public IReadOnlyList<TextSpan> Objects { get; } = objects;
+    public TextSpan? Description { get; } = description;
 
     // ObjectsPart = "OBJECTS" "{" Objects "}" | empty
     static readonly Parser<IReadOnlyList<TextSpan>> ObjectsPart =
@@ -451,11 +453,11 @@ public class NotificationType(
             .AndSkip(Terms.Keyword("NOTIFICATION-TYPE"))
             .And(ObjectsPart.Optional().Then(static x => x.OrSome([])))
             .And(SMIv2.OTStatusPart)
-            .AndSkip(SMIv2.OTDescriptionPart)
+            .And(SMIv2.OTDescriptionPart)
             .AndSkip(SMIv2.OTReferPart.ZeroOrOne())
             .And(SMIv2.OidAssignment)
             .Then(static x => new NotificationType(
-                x.Item1, x.Item4, x.Item3, x.Item2))
+                x.Item1, x.Item5, x.Item3, x.Item2, x.Item4))
             .WithName("NotificationType");
 }
 

@@ -39,6 +39,7 @@ public static class Templating
             $"{accessibility} class {typeName} : ISnmpTableEntry<{typeName}>",
             "{",
             $"\tpublic static Oid Root => field ??= {table.Ident.AsLiteral()};",
+            $"\tpublic static string TableName => \"{typeName.Replace("Entry", string.Empty)}\";",
             .. table.Index.SelectMany((idx, i) => (string[])
             [
                 "",
@@ -103,11 +104,14 @@ public static class Templating
             "{",
             .. indexPart.Indent(),
             "",
-            .. table.Columns.SelectMany((col, i) => (string[])
-            [
-                $"if(!values.TryGetValue({col.Ident.Oid.Last()}, out var _{col.Ident.CSharpName(strip)})) {{ return null; }}",
-                $"if(_{col.Ident.CSharpName(strip)} is not {col.Type.AsAsnType()} {col.Ident.CSharpName(strip)}) {{ return null; }}",
-            ]).Indent(),
+            .. table.Columns.SelectMany((col, i) =>
+            {
+                var colName = col.Ident.CSharpName(strip);
+                return new[]
+                {
+                    $"if(!values.TryGetValue({col.Ident.Oid.Last()}, out var _{colName}) || _{colName} is not {col.Type.AsAsnType()} {colName}) return null;",
+                };
+            }).Indent(),
             "",
             $"\treturn new {typeName}()",
             "\t{",

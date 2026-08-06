@@ -14,7 +14,8 @@ internal sealed class OidTreeNode(uint arc, OidTreeNode? parent)
     public MibItem? Item { get; private set; }
     public Dictionary<uint, OidTreeNode> Children { get; } = [];
 
-    public bool IsValue => Item is MibLeaf or MibTable;
+    public bool IsNotification => Item is MibNotification;
+    public bool IsValue => Item is MibLeaf or MibTable or MibNotification;
     public bool IsNamespace => !IsValue;
 
     public void Define(string? rawName, string moduleName, MibItem? item)
