@@ -1,4 +1,7 @@
 namespace SnmpSharpNet;
 
-public interface ISnmpNotification<out TSelf> : IBranchIdentifier, ISnmpBindings, IOidParseable<TSelf>
-    where TSelf : IOidParseable<TSelf>;
+public interface ISnmpNotification<out TSelf> :
+    IBranchIdentifier,
+    ISnmpOrderedBindings,
+    IVbParseable<TSelf>
+    where TSelf : IVbParseable<TSelf>;

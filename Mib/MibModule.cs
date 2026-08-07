@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using System.Text;
 using Parlot;
 using SnmpSharpNet.Mib.Ast;
 
@@ -83,13 +84,13 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
         // 
         var localTypesByName = module.Items
             .OfType<TextualConvention>()
-            .ToDictionary(x => x.Name.ToString(), x => x.Syntax);
+            .ToDictionary(x => x.Name.ToString());
 
         var typeResolutionStack = new HashSet<string>();
 
         typedefsByName = module.Items
             .OfType<TextualConvention>()
-            .ToDictionary(x => x.Name.ToString(), x => ResolveType(x.Syntax));
+            .ToDictionary(x => x.Name.ToString(), ResolveTextualConvention);
 
         var entryTypes = module.Items
             .OfType<EntryDef>()
@@ -108,7 +109,12 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
         foreach (var lo in module.Items.OfType<LeafObject>())
         {
             var oid = GetOid(lo.Name.ToString());
-            Items.Add(oid, new MibLeaf(oid, ResolveType(lo.Syntax), lo.Accessibility, lo.Description?.ToString()));
+            var type = ResolveType(lo.Syntax);
+            Items.Add(oid, new MibLeaf(
+                oid,
+                type,
+                ResolveMetadata(lo.Metadata),
+                ResolveDefaultValue(lo.DefaultValue, type)));
         }
 
         foreach (var table in module.Items.OfType<ConceptualTable>())
@@ -128,7 +134,7 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
 
             IReadOnlyList<(TextSpan Name, bool IsImplied)>? rowIndex;
             MibTableIndex[]? augmentsIndex = null;
-            string? entryDescription;
+            MibObjectMetadata entryMetadata;
             switch (rowAssigner)
             {
                 case ConceptualRow row when table.EntryType.ToString() != row.EntryType.ToString() ||
@@ -136,14 +142,14 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
                     throw new Exception($"ConceptualTable({oid}) doesn't match ConceptualRow");
                 case ConceptualRow row:
                     rowIndex = row.Index;
-                    entryDescription = row.Description?.ToString();
+                    entryMetadata = ResolveMetadata(row.Metadata);
                     break;
                 case AugmentingConceptualRow augRow when table.EntryType.ToString() != augRow.EntryType.ToString() ||
                                                          table.Status != augRow.Status:
                     throw new Exception($"ConceptualTable({oid}) doesn't match AugmentingConceptualRow");
                 case AugmentingConceptualRow augRow:
                 {
-                    entryDescription = augRow.Description?.ToString();
+                    entryMetadata = ResolveMetadata(augRow.Metadata);
                     var baseRowName = augRow.Augments.ToString();
                     if (assignersByName.TryGetValue(baseRowName, out var assigner) && assigner is ConceptualRow baseRow)
                     {
@@ -177,7 +183,7 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
                 index =
                 [
                     .. rowIndex!
-                        .Select((entry, idx) =>
+                        .Select((entry, _) =>
                         {
                             if (Items.TryGetValue(GetOid(entry.Name.ToString()), out var mibItem) &&
                                 mibItem is MibLeaf item)
@@ -209,7 +215,12 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
                     return col;
                 }).Where(c => c.Accessibility.CanRead());
             Items.Add(oid,
-                new MibTable(oid, [.. index], [.. columns], table.Description?.ToString(), entryDescription));
+                new MibTable(
+                    oid,
+                    [.. index],
+                    [.. columns],
+                    ResolveMetadata(table.Metadata),
+                    entryMetadata));
         }
 
         foreach (var notification in module.Items.OfType<NotificationType>())
@@ -233,7 +244,12 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
                         $"NotificationType({oid}): OBJECTS entry '{obj}' is not a LeafObject");
                 });
 
-            Items.Add(oid, new MibNotification(oid, notification.Status, [.. objects], notification.Description?.ToString()));
+            Items.Add(oid, new MibNotification(
+                oid,
+                notification.Status,
+                [.. objects],
+                ToOptionalString(notification.Description),
+                ToOptionalString(notification.Reference)));
         }
 
         // Snapshot all items before removing columns, so TryImport can still find them
@@ -252,6 +268,23 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
         }
 
         return;
+
+        MibType ResolveTextualConvention(TextualConvention textualConvention)
+        {
+            var resolved = ResolveType(textualConvention.Syntax);
+            var metadata = textualConvention.Metadata;
+            return new MibType(
+                resolved.Kind,
+                resolved.Refinement,
+                resolved.Values,
+                textualConvention.Name.ToString(),
+                new MibTextualConvention(
+                    textualConvention.Name.ToString(),
+                    ToOptionalString(metadata.DisplayHint),
+                    metadata.Status,
+                    metadata.Description.ToString(),
+                    ToOptionalString(metadata.Reference)));
+        }
 
         MibType ResolveType(AstType type)
         {
@@ -275,7 +308,7 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
                 MibType resolved;
                 if (localTypesByName.TryGetValue(typeName, out var localType))
                 {
-                    resolved = ResolveType(localType);
+                    resolved = ResolveTextualConvention(localType);
                 }
                 else if (importedTypes.TryGetValue(typeName, out var importedType))
                 {
@@ -294,7 +327,8 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
                             ? Refinement.Merge(resolved.Refinement, type.Refinement)
                             : resolved.Refinement,
                         resolved.Values,
-                        type.Name?.ToString());
+                        type.Name?.ToString(),
+                        resolved.TextualConvention);
                 }
                 catch (Exception e)
                 {
@@ -306,6 +340,274 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
                 typeResolutionStack.Remove(typeName);
             }
         }
+
+        static MibObjectMetadata ResolveMetadata(ObjectTypeMetadata metadata) => new(
+            metadata.Accessibility,
+            metadata.Status,
+            ToOptionalString(metadata.Units),
+            ToOptionalString(metadata.Description),
+            ToOptionalString(metadata.Reference));
+
+        static string? ToOptionalString(TextSpan? text)
+        {
+            var value = text?.ToString();
+            return string.IsNullOrEmpty(value) ? null : value;
+        }
+
+        MibDefaultValue? ResolveDefaultValue(AstDefaultValue? value, MibType type)
+        {
+            if (value is null)
+            {
+                return null;
+            }
+
+            if (type.Kind is TypeKind.Counter32 or TypeKind.Counter64)
+            {
+                throw new InvalidOperationException(
+                    $"DEFVAL is not permitted for {type.Kind} syntax.");
+            }
+
+            return type.Kind switch
+            {
+                TypeKind.Integer32 or TypeKind.Integer32Enum or TypeKind.Unsigned32 or TypeKind.Gauge32 or
+                    TypeKind.TimeTicks => ResolveNumericDefault(value, type),
+                TypeKind.OctetString or TypeKind.Opaque => ResolveOctetStringDefault(value, type),
+                TypeKind.Bits => ResolveBitsDefault(value, type),
+                TypeKind.ObjectIdentifier => ResolveObjectIdentifierDefault(value),
+                TypeKind.IpAddress => ResolveIpAddressDefault(value),
+                _ => throw new InvalidOperationException(
+                    $"DEFVAL is not supported for {type.Kind} syntax.")
+            };
+        }
+
+        static MibDefaultValue ResolveNumericDefault(AstDefaultValue value, MibType type)
+        {
+            long number;
+            switch (value.Kind)
+            {
+                case AstDefaultValueKind.Number when value.Number is { } numeric:
+                    number = numeric;
+                    break;
+                case AstDefaultValueKind.Identifier when value.Text is { } identifier &&
+                                                         type.Values is { } values &&
+                                                         values.TryGetValue(identifier.ToString(), out var namedValue):
+                    number = namedValue;
+                    break;
+                default:
+                    throw new InvalidOperationException(
+                        $"DEFVAL '{Describe(value)}' is not a numeric value permitted by {type}.");
+            }
+
+            if (type.Kind is TypeKind.Integer32 or TypeKind.Integer32Enum &&
+                number is < int.MinValue or > int.MaxValue)
+            {
+                throw new InvalidOperationException($"DEFVAL '{number}' is outside the Integer32 range.");
+            }
+
+            if (type.Kind is TypeKind.Unsigned32 or TypeKind.Gauge32 or TypeKind.TimeTicks &&
+                number is < 0 or > uint.MaxValue)
+            {
+                throw new InvalidOperationException($"DEFVAL '{number}' is outside the Unsigned32 range.");
+            }
+
+            if (type.Kind == TypeKind.Integer32Enum &&
+                type.Values is { Count: > 0 } enumValues &&
+                !enumValues.Values.Contains(number))
+            {
+                throw new InvalidOperationException(
+                    $"DEFVAL '{number}' is not a named value in {type}.");
+            }
+
+            if (type.Refinement is { IsSize: false, Constraints.Count: > 0 } refinement &&
+                !refinement.Constraints.Any(constraint => number >= constraint.Min && number <= constraint.Max))
+            {
+                throw new InvalidOperationException(
+                    $"DEFVAL '{number}' is outside the allowed range for {type}.");
+            }
+
+            return new MibDefaultValue(MibDefaultValueKind.Number, number: number);
+        }
+
+        static MibDefaultValue ResolveOctetStringDefault(AstDefaultValue value, MibType type)
+        {
+            byte[] octets = value.Kind switch
+            {
+                AstDefaultValueKind.String when value.Text is { } text => Encoding.UTF8.GetBytes(text.ToString()),
+                AstDefaultValueKind.HexString when value.Text is { } text => DecodeHex(text.ToString()),
+                AstDefaultValueKind.BinaryString when value.Text is { } text => DecodeBinary(text.ToString()),
+                _ => throw new InvalidOperationException(
+                    $"DEFVAL '{Describe(value)}' is not an OCTET STRING value.")
+            };
+            ValidateSize(octets.Length, type);
+            return new MibDefaultValue(MibDefaultValueKind.Octets, octets: octets);
+        }
+
+        static MibDefaultValue ResolveBitsDefault(AstDefaultValue value, MibType type)
+        {
+            if (value.Kind != AstDefaultValueKind.Bits)
+            {
+                throw new InvalidOperationException(
+                    $"DEFVAL '{Describe(value)}' is not a BITS value.");
+            }
+
+            var values = type.Values ?? throw new InvalidOperationException(
+                $"BITS syntax '{type}' is missing named bit values.");
+            var names = value.Names.Select(name => name.ToString()).ToArray();
+            foreach (var name in names)
+            {
+                if (!values.ContainsKey(name))
+                {
+                    throw new InvalidOperationException(
+                        $"DEFVAL bit '{name}' is not declared by {type}.");
+                }
+            }
+
+            return new MibDefaultValue(MibDefaultValueKind.Bits, names: names);
+        }
+
+        MibDefaultValue ResolveObjectIdentifierDefault(AstDefaultValue value)
+        {
+            if (value.Kind == AstDefaultValueKind.Identifier && value.Text is { } identifier)
+            {
+                return new MibDefaultValue(
+                    MibDefaultValueKind.ObjectIdentifier,
+                    objectIdentifier: GetOid(identifier.ToString()).Oid);
+            }
+
+            if (value.Kind != AstDefaultValueKind.ObjectIdentifier || value.ObjectIdentifier.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    $"DEFVAL '{Describe(value)}' is not an OBJECT IDENTIFIER value.");
+            }
+
+            var arcs = new List<uint>();
+            foreach (var component in value.ObjectIdentifier)
+            {
+                if (component.Name is { } name)
+                {
+                    if (arcs.Count == 0)
+                    {
+                        var resolved = GetOid(name.ToString()).Oid;
+                        arcs.AddRange(resolved);
+                        if (component.Number is { } namedRootNumber &&
+                            (resolved.Length == 0 ||
+                             resolved[resolved.Length - 1] != ToOidArc(namedRootNumber, "DEFVAL")))
+                        {
+                            throw new InvalidOperationException(
+                                $"DEFVAL component '{name}({namedRootNumber})' does not match its named OBJECT IDENTIFIER.");
+                        }
+
+                        continue;
+                    }
+
+                    var namedResolved = GetOid(name.ToString()).Oid;
+                    if (component.Number is null)
+                    {
+                        if (namedResolved.Length < arcs.Count ||
+                            !arcs.SequenceEqual(namedResolved.Take(arcs.Count)))
+                        {
+                            throw new InvalidOperationException(
+                                $"DEFVAL component '{name}' is not below the preceding OBJECT IDENTIFIER.");
+                        }
+
+                        arcs = [.. namedResolved];
+                        continue;
+                    }
+
+                    var namedNumber = ToOidArc(component.Number.Value, "DEFVAL");
+                    if (namedResolved.Length != arcs.Count + 1 ||
+                        !arcs.SequenceEqual(namedResolved.Take(arcs.Count)) ||
+                        namedResolved[namedResolved.Length - 1] != namedNumber)
+                    {
+                        throw new InvalidOperationException(
+                            $"DEFVAL component '{name}({component.Number})' does not match its named OBJECT IDENTIFIER.");
+                    }
+
+                    arcs = [.. namedResolved];
+                    continue;
+                }
+
+                if (component.Number is { } number)
+                {
+                    arcs.Add(ToOidArc(number, "DEFVAL"));
+                }
+            }
+
+            if (arcs.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    $"DEFVAL '{Describe(value)}' is not an OBJECT IDENTIFIER value.");
+            }
+
+            return new MibDefaultValue(MibDefaultValueKind.ObjectIdentifier, objectIdentifier: arcs);
+        }
+
+        static MibDefaultValue ResolveIpAddressDefault(AstDefaultValue value)
+        {
+            if (value.Kind != AstDefaultValueKind.String || value.Text is not { } text ||
+                !System.Net.IPAddress.TryParse(text.ToString(), out var address) ||
+                address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+            {
+                throw new InvalidOperationException(
+                    $"DEFVAL '{Describe(value)}' is not an IPv4 address.");
+            }
+
+            return new MibDefaultValue(MibDefaultValueKind.Octets, octets: address.GetAddressBytes());
+        }
+
+        static void ValidateSize(int size, MibType type)
+        {
+            if (type.Refinement is not { IsSize: true, Constraints.Count: > 0 } refinement ||
+                refinement.Constraints.Any(constraint => size >= constraint.Min && size <= constraint.Max))
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(
+                $"DEFVAL length '{size}' is outside the allowed size for {type}.");
+        }
+
+        static byte[] DecodeHex(string source)
+        {
+            var hex = RemoveWhitespace(source);
+            if (hex.Length % 2 != 0 || hex.Any(character => !Uri.IsHexDigit(character)))
+            {
+                throw new InvalidOperationException($"DEFVAL '{source}' is not valid hexadecimal data.");
+            }
+
+            var value = new byte[hex.Length / 2];
+            for (var index = 0; index < value.Length; index++)
+            {
+                value[index] = Convert.ToByte(hex.Substring(index * 2, 2), 16);
+            }
+
+            return value;
+        }
+
+        static byte[] DecodeBinary(string source)
+        {
+            var binary = RemoveWhitespace(source);
+            if (binary.Any(character => character is not ('0' or '1')) || binary.Length % 8 != 0)
+            {
+                throw new InvalidOperationException($"DEFVAL '{source}' is not valid binary data.");
+            }
+
+            var value = new byte[binary.Length / 8];
+            for (var index = 0; index < value.Length; index++)
+            {
+                value[index] = Convert.ToByte(binary.Substring(index * 8, 8), 2);
+            }
+
+            return value;
+        }
+
+        static string RemoveWhitespace(string source) =>
+            new(source.Where(character => !char.IsWhiteSpace(character)).ToArray());
+
+        static string Describe(AstDefaultValue value) =>
+            value.Text?.ToString() ??
+            value.Number?.ToString() ??
+            string.Join(", ", value.Names.Select(name => name.ToString()));
 
         MibItemIdent GetOid(string name)
         {
@@ -324,16 +626,44 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
                 throw new Exception($"Identifier '{name}' is missing");
             }
 
-            var parent = GetOid(item.Oid.Parent.ToString());
+            var parent = item.Oid.NumericArcs is { } numericArcs
+                ? CreateNumericParent(numericArcs, item.Name.ToString())
+                : GetOid(item.Oid.Parent.ToString());
             foreach (var (compName, compNumber) in item.Oid.Components)
             {
-                parent = parent.Add((uint)compNumber, compName.ToString());
+                parent = parent.Add(ToOidArc(compNumber, item.Name.ToString()), compName.ToString());
             }
 
-            var resolved = parent.Add((uint)item.Oid.Oid, item.Name.ToString());
+            var resolved = parent.Add(ToOidArc(item.Oid.Oid, item.Name.ToString()), item.Name.ToString());
             oidByName[name] = resolved;
             itemByOid[resolved] = item;
             return resolved;
+        }
+
+        static MibItemIdent CreateNumericParent(IReadOnlyList<long> numericArcs, string itemName)
+        {
+            var parentLength = numericArcs.Count - 1;
+            var oid = new uint[parentLength];
+            var names = new string?[parentLength];
+            for (var index = 0; index < parentLength; index++)
+            {
+                oid[index] = ToOidArc(numericArcs[index], itemName);
+            }
+
+            return new MibItemIdent(oid, names);
+        }
+
+        static uint ToOidArc(long arc, string itemName)
+        {
+            if (arc is < 0 or > uint.MaxValue)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(arc),
+                    arc,
+                    $"OID arc in assignment '{itemName}' must be between 0 and {uint.MaxValue}.");
+            }
+
+            return (uint)arc;
         }
     }
 
@@ -385,7 +715,7 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
 
     public override string ToString()
     {
-        var sb = new System.Text.StringBuilder();
+        var sb = new StringBuilder();
         foreach (var kv in Items)
         {
             var item = kv.Value;
@@ -417,7 +747,8 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
                     sb.AppendLine("}");
                     break;
                 case MibNotification notification:
-                    sb.AppendLine($" ::= Notification [{string.Join(", ", notification.Objects.Select(x => x.Ident.Name))}]");
+                    sb.AppendLine(
+                        $" ::= Notification [{string.Join(", ", notification.Objects.Select(x => x.Ident.Name))}]");
                     break;
             }
         }

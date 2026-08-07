@@ -1,17 +1,13 @@
-using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using Mib.Ast;
 using Parlot;
-using Parlot.Compilation;
 using Parlot.Fluent;
 using static Parlot.Fluent.Parsers;
 
 namespace SnmpSharpNet.Mib.Ast;
 
 using Import = (IReadOnlyList<TextSpan> symbols, TextSpan fromModule);
-
 
 public enum SMIv2Status
 {
@@ -38,10 +34,38 @@ public static class SMIv2AccessibilityExtensions
     }
 }
 
+/// <summary>Presentation fields shared by OBJECT-TYPE definitions.</summary>
+public sealed class ObjectTypeMetadata(
+    SMIv2Accessibility accessibility,
+    SMIv2Status status,
+    TextSpan? units,
+    TextSpan? description,
+    TextSpan? reference)
+{
+    public SMIv2Accessibility Accessibility { get; } = accessibility;
+    public SMIv2Status Status { get; } = status;
+    public TextSpan? Units { get; } = units;
+    public TextSpan? Description { get; } = description;
+    public TextSpan? Reference { get; } = reference;
+}
+
+/// <summary>Presentation fields declared by a TEXTUAL-CONVENTION.</summary>
+public sealed class TextualConventionMetadata(
+    TextSpan? displayHint,
+    SMIv2Status status,
+    TextSpan description,
+    TextSpan? reference)
+{
+    public TextSpan? DisplayHint { get; } = displayHint;
+    public SMIv2Status Status { get; } = status;
+    public TextSpan Description { get; } = description;
+    public TextSpan? Reference { get; } = reference;
+}
 
 // Common helpers for ASN.1 / Structure of Management Information Version 2
 // See https://www.rfc-editor.org/rfc/rfc2578.html
-public static class SMIv2 {
+public static class SMIv2
+{
     // Whitespace parser that handles -- single-line comments globally
     public static readonly Parser<TextSpan> MibWhiteSpace =
         Capture(OneOf(
@@ -62,30 +86,42 @@ public static class SMIv2 {
 
     public static readonly Parser<IReadOnlyList<TextSpan>> Idents =
         Separated(Terms.Char(','), Ident).WithName("Idents");
-    
+
     // Block[x] = "{" x "}"
     public static Parser<T> Block<T>(Parser<T> inner) =>
         Between(Terms.Char('{'), inner, Terms.Char('}')).WithName("Block");
 
     // OidAssignment = "::=" "{" IDENT ("(" <number> ")")? ( IDENT "(" <number> ")" )* <number> "}"
     public static readonly Parser<UnresolvedOid> OidAssignment =
-        Terms.Text("::=").ElseError("Expected '::='")
-            .SkipAnd(Terms.Char('{').ElseError("Expected '{' after '::='"))
-            .SkipAnd(Ident.ElseError("Expected OID parent name"))
-            .AndSkip(
-                // Skip optional (number) on the parent ident (e.g. iso(1))
-                Terms.Char('(').SkipAnd(Terms.Integer()).AndSkip(Terms.Char(')')).Optional()
+        OneOf(
+                Terms.Text("::=").ElseError("Expected '::='")
+                    .SkipAnd(Terms.Char('{').ElseError("Expected '{' after '::='"))
+                    .SkipAnd(
+                        Terms.Integer()
+                            .And(Terms.Integer())
+                            .Then(static x => new[] { x.Item1, x.Item2 })
+                            .And(Terms.Integer().ZeroOrMany())
+                            .Then(static x => new UnresolvedOid([.. x.Item1, .. x.Item2]))
+                    )
+                    .AndSkip(Terms.Char('}').ElseError("Expected '}'")),
+                Terms.Text("::=").ElseError("Expected '::='")
+                    .SkipAnd(Terms.Char('{').ElseError("Expected '{' after '::='"))
+                    .SkipAnd(Ident.ElseError("Expected OID parent name"))
+                    .AndSkip(
+                        // Skip optional (number) on the parent ident (e.g. iso(1))
+                        Terms.Char('(').SkipAnd(Terms.Integer()).AndSkip(Terms.Char(')')).Optional()
+                    )
+                    .And(
+                        Ident
+                            .AndSkip(Terms.Char('(').ElseError("Expected '(' after OID component name"))
+                            .And(Terms.Integer().ElseError("Expected OID number"))
+                            .AndSkip(Terms.Char(')').ElseError("Expected ')' after OID component number"))
+                            .ZeroOrMany()
+                    )
+                    .And(Terms.Integer().ElseError("Expected OID number"))
+                    .AndSkip(Terms.Char('}').ElseError("Expected '}'"))
+                    .Then(static x => new UnresolvedOid(x.Item1, x.Item2, x.Item3))
             )
-            .And(
-                Ident
-                .AndSkip(Terms.Char('(').ElseError("Expected '(' after OID component name"))
-                .And(Terms.Integer().ElseError("Expected OID number"))
-                .AndSkip(Terms.Char(')').ElseError("Expected ')' after OID component number"))
-                .ZeroOrMany()
-            )
-            .And(Terms.Integer().ElseError("Expected OID number"))
-            .AndSkip(Terms.Char('}').ElseError("Expected '}'"))
-            .Then(static x => new UnresolvedOid(x.Item1, x.Item2, x.Item3))
             .WithName("OidAssignment");
 
     //
@@ -108,12 +144,13 @@ public static class SMIv2 {
         Terms.Keyword("MAX-ACCESS")
             .SkipAnd(
                 OneOf(
-                    Terms.Keyword("not-accessible").Then(static x => SMIv2Accessibility.NotAccessible),
-                    Terms.Keyword("accessible-for-notify").Then(static x => SMIv2Accessibility.AccessibleForNotify),
-                    Terms.Keyword("read-only").Then(static x => SMIv2Accessibility.ReadOnly),
-                    Terms.Keyword("read-write").Then(static x => SMIv2Accessibility.ReadWrite),
-                    Terms.Keyword("read-create").Then(static x => SMIv2Accessibility.ReadCreate)
-                ).ElseError("Expected 'not-accessible', 'accessible-for-notify', 'read-only', 'read-write' or 'read-create' after MAX-ACCESS")
+                    Terms.Keyword("not-accessible").Then(static _ => SMIv2Accessibility.NotAccessible),
+                    Terms.Keyword("accessible-for-notify").Then(static _ => SMIv2Accessibility.AccessibleForNotify),
+                    Terms.Keyword("read-only").Then(static _ => SMIv2Accessibility.ReadOnly),
+                    Terms.Keyword("read-write").Then(static _ => SMIv2Accessibility.ReadWrite),
+                    Terms.Keyword("read-create").Then(static _ => SMIv2Accessibility.ReadCreate)
+                ).ElseError(
+                    "Expected 'not-accessible', 'accessible-for-notify', 'read-only', 'read-write' or 'read-create' after MAX-ACCESS")
             ).WithName("OTMaxAccessPart");
 
     // OTStatusPart = "STATUS" ("current" | "deprecated" | "obsolete")
@@ -121,74 +158,99 @@ public static class SMIv2 {
         Terms.Keyword("STATUS")
             .SkipAnd(
                 OneOf(
-                    Terms.Keyword("current").Then(static x => SMIv2Status.Current),
-                    Terms.Keyword("deprecated").Then(static x => SMIv2Status.Deprecated),
-                    Terms.Keyword("obsolete").Then(static x => SMIv2Status.Obsolete)
+                    Terms.Keyword("current").Then(static _ => SMIv2Status.Current),
+                    Terms.Keyword("deprecated").Then(static _ => SMIv2Status.Deprecated),
+                    Terms.Keyword("obsolete").Then(static _ => SMIv2Status.Obsolete)
                 ).ElseError("Expected 'current', 'deprecated', or 'obsolete' after STATUS")
             ).WithName("OTStatusPart");
 
 
-    // This is simply ignored
     // OTDescriptionPart = "DESCRIPTION" <string>
     public static readonly Parser<TextSpan> OTDescriptionPart =
         Terms.Keyword("DESCRIPTION")
             .SkipAnd(String.ElseError("Expected string after DESCRIPTION"))
             .WithName("OTDescriptionPart");
 
-    // This is simply ignored
     // OTReferPart = "REFERENCE" <string>
     public static readonly Parser<TextSpan> OTReferPart =
         Terms.Keyword("REFERENCE")
             .SkipAnd(String.ElseError("Expected string after REFERENCE"))
             .WithName("OTReferPart");
 
-    // This is simply ignored
     // OTUnitsPart = "UNITS" <string>
     public static readonly Parser<TextSpan> OTUnitsPart =
         Terms.Keyword("UNITS")
             .SkipAnd(String.ElseError("Expected string after UNITS"))
             .WithName("OTUnitsPart");
 
-    // Note: Currently we only return max-access, status and description
     //  OTMiddlePart =
     //      OTUnitsPart?
     //      OTMaxAccessPart
     //      OTStatusPart
     //      OTDescriptionPart
     //      OTReferPart?
-    public static readonly Parser<(SMIv2Accessibility, SMIv2Status, TextSpan?)> OTMiddlePart =
+    public static readonly Parser<ObjectTypeMetadata> OTMiddlePart =
         OTUnitsPart.ZeroOrOne()
-            .SkipAnd(OTMaxAccessPart.ElseError("Expected 'MAX-ACCESS' in object type"))
+            .And(OTMaxAccessPart.ElseError("Expected 'MAX-ACCESS' in object type"))
             .And(OTStatusPart.ElseError("Expected 'STATUS' in object type"))
-            .And(OTDescriptionPart.ZeroOrOne().Then(static x => x.Length == 0 ? (TextSpan?)null : x))
-            .AndSkip(OTReferPart.ZeroOrOne())
-            .Then(static x => (x.Item1, x.Item2, x.Item3))
+            .And(OTDescriptionPart.ZeroOrOne())
+            .And(OTReferPart.ZeroOrOne())
+            .Then(static x => new ObjectTypeMetadata(
+                x.Item2,
+                x.Item3,
+                OptionalText(x.Item1),
+                OptionalText(x.Item4),
+                OptionalText(x.Item5)))
             .WithName("OTMiddlePart");
+
+    public static readonly Parser<TextualConventionMetadata> TextualConventionMiddlePart =
+        Terms.Keyword("DISPLAY-HINT")
+            .SkipAnd(String)
+            .ZeroOrOne()
+            .And(OTStatusPart)
+            .And(OTDescriptionPart)
+            .And(OTReferPart.ZeroOrOne())
+            .Then(static x => new TextualConventionMetadata(
+                OptionalText(x.Item1),
+                x.Item2,
+                x.Item3,
+                OptionalText(x.Item4)))
+            .WithName("TextualConventionMiddlePart");
+
+    private static TextSpan? OptionalText(TextSpan value) =>
+        string.IsNullOrEmpty(value.ToString()) ? default : value;
 }
 
-
- 
 public class UnresolvedOid(
     TextSpan parent,
     IReadOnlyList<(TextSpan Name, long Number)> components,
     long oid
-) {
+)
+{
     public TextSpan Parent { get; } = parent;
+    public IReadOnlyList<long>? NumericArcs { get; }
     public IReadOnlyList<(TextSpan Name, long Number)> Components { get; } = components;
     public long Oid { get; } = oid;
+
+    public UnresolvedOid(IReadOnlyList<long> numericArcs)
+        : this(default, [], numericArcs[numericArcs.Count - 1])
+    {
+        NumericArcs = numericArcs;
+    }
 };
 
 public class ModuleDefinition(
     TextSpan identifier,
     IReadOnlyList<Import> imports,
     IReadOnlyList<ModuleItem> items
-) {
+)
+{
     public TextSpan Identifier { get; } = identifier;
     public IReadOnlyList<Import> Imports { get; } = imports;
     public IReadOnlyList<ModuleItem> Items { get; } = items;
 
 
-    public IEnumerable<string> Dependencies =>  Imports.Select(x => x.fromModule.ToString());
+    public IEnumerable<string> Dependencies => Imports.Select(x => x.fromModule.ToString());
 
 
     // ImportsSymbolsFromModule = Symbol ("," Symbol)* "FROM" ModuleIdentifier
@@ -228,8 +290,6 @@ public class ModuleDefinition(
 
     public static Parser<ModuleDefinition> EntryPoint = Module;
 };
-
-
 
 public abstract class ModuleItem
 {
@@ -271,7 +331,8 @@ public abstract class ModuleItem
 public abstract class OidAssigner(
     TextSpan name,
     UnresolvedOid oid
-) : ModuleItem {
+) : ModuleItem
+{
     public TextSpan Name { get; } = name;
     public UnresolvedOid Oid { get; } = oid;
 }
@@ -280,13 +341,15 @@ public abstract class OidAssigner(
 public abstract class ObjectType(
     TextSpan name,
     UnresolvedOid oid,
-    SMIv2Accessibility accessibility,
-    SMIv2Status status,
-    TextSpan? description
-) : OidAssigner(name, oid) {
-    public SMIv2Accessibility Accessibility { get; } = accessibility;
-    public SMIv2Status Status { get; } = status;
-    public TextSpan? Description { get; } = description;
+    ObjectTypeMetadata metadata
+) : OidAssigner(name, oid)
+{
+    public ObjectTypeMetadata Metadata { get; } = metadata;
+    public SMIv2Accessibility Accessibility => Metadata.Accessibility;
+    public SMIv2Status Status => Metadata.Status;
+    public TextSpan? Units => Metadata.Units;
+    public TextSpan? Description => Metadata.Description;
+    public TextSpan? Reference => Metadata.Reference;
 }
 
 // A <EntryType> defintion in 7.1.12 "Conceptual Tables" of RFC2578
@@ -295,7 +358,8 @@ public abstract class ObjectType(
 public class EntryDef(
     TextSpan name,
     IReadOnlyList<(TextSpan name, AstType type)> fields
-) : ModuleItem {
+) : ModuleItem
+{
     public TextSpan Name { get; } = name;
     public IReadOnlyList<(TextSpan name, AstType type)> Fields { get; } = fields;
 
@@ -319,10 +383,13 @@ public class EntryDef(
 // See https://www.rfc-editor.org/rfc/rfc2579.html#section-3
 public class TextualConvention(
     TextSpan name,
-    AstType syntax
-) : ModuleItem {
+    AstType syntax,
+    TextualConventionMetadata metadata
+) : ModuleItem
+{
     public TextSpan Name { get; } = name;
     public AstType Syntax { get; } = syntax;
+    public TextualConventionMetadata Metadata { get; } = metadata;
 
     //  TextualConvention = IDENT "::=" "TEXTUAL-CONVENTION"
     //       ("DISPLAY-HINT" <string>)?
@@ -334,12 +401,9 @@ public class TextualConvention(
         SMIv2.Ident
             .AndSkip(Terms.Text("::="))
             .AndSkip(Terms.Keyword("TEXTUAL-CONVENTION"))
-            .AndSkip(Terms.Keyword("DISPLAY-HINT").AndSkip(SMIv2.String).ZeroOrOne())
-            .AndSkip(SMIv2.OTStatusPart)
-            .AndSkip(SMIv2.OTDescriptionPart)
-            .AndSkip(SMIv2.OTReferPart.ZeroOrOne())
+            .And(SMIv2.TextualConventionMiddlePart)
             .And(SMIv2.OTSyntaxPart)
-            .Then(static x => new TextualConvention(x.Item1, x.Item2))
+            .Then(static x => new TextualConvention(x.Item1, x.Item3, x.Item2))
             .WithName("TextualConvention");
 }
 
@@ -347,7 +411,8 @@ public class TextualConvention(
 public class ObjectIdentifier(
     TextSpan name,
     UnresolvedOid oid
-) : OidAssigner(name, oid) {
+) : OidAssigner(name, oid)
+{
     // Note that this is a single keyword, even if it's 2 words.
     // See `ObjectIdentifierType` in section 32.1 of X.680 (ASN.1 spec)
     // ObjectIdentifier = IDENT "OBJECT" "IDENTIFIER" OidAssignment
@@ -385,7 +450,8 @@ public class ModuleIdentity(
     TextSpan contactInfo,
     TextSpan description,
     IReadOnlyList<(TextSpan, TextSpan)> revisions
-) : OidAssigner(name, oid) {
+) : OidAssigner(name, oid)
+{
     public TextSpan LastUpdated { get; } = lastUpdated;
     public TextSpan Organization { get; } = organization;
     public TextSpan ContactInfo { get; } = contactInfo;
@@ -431,11 +497,14 @@ public class NotificationType(
     UnresolvedOid oid,
     SMIv2Status status,
     IReadOnlyList<TextSpan> objects,
-    TextSpan? description
-) : OidAssigner(name, oid) {
+    TextSpan? description,
+    TextSpan? reference
+) : OidAssigner(name, oid)
+{
     public SMIv2Status Status { get; } = status;
     public IReadOnlyList<TextSpan> Objects { get; } = objects;
     public TextSpan? Description { get; } = description;
+    public TextSpan? Reference { get; } = reference;
 
     // ObjectsPart = "OBJECTS" "{" Objects "}" | empty
     static readonly Parser<IReadOnlyList<TextSpan>> ObjectsPart =
@@ -454,10 +523,11 @@ public class NotificationType(
             .And(ObjectsPart.Optional().Then(static x => x.OrSome([])))
             .And(SMIv2.OTStatusPart)
             .And(SMIv2.OTDescriptionPart)
-            .AndSkip(SMIv2.OTReferPart.ZeroOrOne())
+            .And(SMIv2.OTReferPart.ZeroOrOne())
             .And(SMIv2.OidAssignment)
             .Then(static x => new NotificationType(
-                x.Item1, x.Item5, x.Item3, x.Item2, x.Item4))
+                x.Item1, x.Item6, x.Item3, x.Item2, x.Item4,
+                string.IsNullOrEmpty(x.Item5.ToString()) ? default : x.Item5))
             .WithName("NotificationType");
 }
 
@@ -468,10 +538,9 @@ public class ConceptualTable(
     TextSpan name,
     UnresolvedOid oid,
     AstType entryType,
-    SMIv2Accessibility accessibility,
-    SMIv2Status status,
-    TextSpan? description
-) : ObjectType(name, oid, accessibility, status, description) {
+    ObjectTypeMetadata metadata
+) : ObjectType(name, oid, metadata)
+{
     public AstType EntryType { get; } = entryType;
 
     //  ConceptualTable = IDENT "OBJECT-TYPE"
@@ -488,7 +557,7 @@ public class ConceptualTable(
             .And(SMIv2.OTMiddlePart)
             .And(SMIv2.OidAssignment)
             .Then(static x => new ConceptualTable(
-                x.Item1, x.Item4, x.Item2, x.Item3.Item1, x.Item3.Item2, x.Item3.Item3))
+                x.Item1, x.Item4, x.Item2, x.Item3))
             .WithName("ConceptualTable");
 }
 
@@ -499,11 +568,10 @@ public class ConceptualRow(
     TextSpan name,
     UnresolvedOid oid,
     AstType entryType,
-    SMIv2Accessibility accessibility,
-    SMIv2Status status,
-    TextSpan? description,
+    ObjectTypeMetadata metadata,
     IReadOnlyList<(TextSpan Name, bool IsImplied)> index
-) : ObjectType(name, oid, accessibility, status, description) {
+) : ObjectType(name, oid, metadata)
+{
     public AstType EntryType { get; } = entryType;
     public IReadOnlyList<(TextSpan Name, bool IsImplied)> Index { get; } = index;
 
@@ -540,7 +608,7 @@ public class ConceptualRow(
             .And(OTIndexPart)
             .And(SMIv2.OidAssignment)
             .Then(static x => new ConceptualRow(
-                x.Item1, x.Item5, x.Item2, x.Item3.Item1, x.Item3.Item2, x.Item3.Item3, x.Item4))
+                x.Item1, x.Item5, x.Item2, x.Item3, x.Item4))
             .WithName("ConceptualRow");
 }
 
@@ -551,11 +619,10 @@ public class AugmentingConceptualRow(
     TextSpan name,
     UnresolvedOid oid,
     AstType entryType,
-    SMIv2Accessibility accessibility,
-    SMIv2Status status,
-    TextSpan? description,
+    ObjectTypeMetadata metadata,
     TextSpan augments
-) : ObjectType(name, oid, accessibility, status, description) {
+) : ObjectType(name, oid, metadata)
+{
     public AstType EntryType { get; } = entryType;
     public TextSpan Augments { get; } = augments;
 
@@ -579,29 +646,104 @@ public class AugmentingConceptualRow(
             .And(OTAugmentsPart)
             .And(SMIv2.OidAssignment)
             .Then(static x => new AugmentingConceptualRow(
-                x.Item1, x.Item5, x.Item2, x.Item3.Item1, x.Item3.Item2, x.Item3.Item3, x.Item4))
+                x.Item1, x.Item5, x.Item2, x.Item3, x.Item4))
             .WithName("AugmentingConceptualRow");
 }
 
 // OBJECT-TYPE for leafs
+public enum AstDefaultValueKind
+{
+    Number,
+    Identifier,
+    String,
+    Bits,
+    ObjectIdentifier,
+    HexString,
+    BinaryString
+}
+
+/// <summary>One numeric or named component in an OBJECT IDENTIFIER DEFVAL.</summary>
+public sealed class AstOidComponent(TextSpan? name = null, long? number = null)
+{
+    public TextSpan? Name { get; } = name;
+    public long? Number { get; } = number;
+}
+
+/// <summary>Structured DEFVAL syntax, before it is checked against a resolved MIB type.</summary>
+public sealed class AstDefaultValue(
+    AstDefaultValueKind kind,
+    long? number = null,
+    TextSpan? text = null,
+    IReadOnlyList<TextSpan>? names = null,
+    IReadOnlyList<AstOidComponent>? objectIdentifier = null)
+{
+    public AstDefaultValueKind Kind { get; } = kind;
+    public long? Number { get; } = number;
+    public TextSpan? Text { get; } = text;
+    public IReadOnlyList<TextSpan> Names { get; } = names ?? [];
+    public IReadOnlyList<AstOidComponent> ObjectIdentifier { get; } = objectIdentifier ?? [];
+}
+
 public class LeafObject(
     TextSpan name,
     UnresolvedOid oid,
     AstType syntax,
-    SMIv2Accessibility accessibility,
-    SMIv2Status status,
-    TextSpan? description
-) : ObjectType(name, oid, accessibility, status, description) {
+    ObjectTypeMetadata metadata,
+    AstDefaultValue? defaultValue
+) : ObjectType(name, oid, metadata)
+{
     public AstType Syntax { get; } = syntax;
+    public AstDefaultValue? DefaultValue { get; } = defaultValue;
 
-    // This is simply ignored
     // OTDefValPart = "DEFVAL" "{" "{" IDENT ("," IDENT)* "}""}"
-    //              | "DEFVAL" "{" <raw> "}"
-    public static readonly Parser<TextSpan> OTDefValPart =
+    //              | "DEFVAL" "{" <number> | IDENT | string | binary-string "}"
+    private static readonly Parser<AstDefaultValue> BitsDefault =
+        SMIv2.Block(SMIv2.Idents.Optional().Then(static x => x.OrSome([])))
+            .Then(static names => new AstDefaultValue(AstDefaultValueKind.Bits, names: names));
+
+    private static readonly Parser<AstOidComponent> ObjectIdentifierComponent =
+        OneOf(
+            Terms.Integer().Then(static number => new AstOidComponent(number: number)),
+            SMIv2.Ident
+                .AndSkip(Terms.Char('('))
+                .And(Terms.Integer())
+                .AndSkip(Terms.Char(')'))
+                .Then(static value => new AstOidComponent(value.Item1, value.Item2)),
+            SMIv2.Ident.Then(static name => new AstOidComponent(name))
+        );
+
+    private static readonly Parser<AstDefaultValue> ObjectIdentifierDefault =
+        SMIv2.Block(ObjectIdentifierComponent.OneOrMany())
+            .Then(static components => new AstDefaultValue(
+                AstDefaultValueKind.ObjectIdentifier,
+                objectIdentifier: components));
+
+    private static readonly Parser<AstDefaultValue> StringDefault =
+        SMIv2.String.Then(static text => new AstDefaultValue(AstDefaultValueKind.String, text: text));
+
+    private static readonly Parser<AstDefaultValue> BinaryDefault =
+        Terms.Char('\'')
+            .SkipAnd(AnyCharBefore(Terms.Char('\''), canBeEmpty: true, consumeDelimiter: true))
+            .And(OneOf(
+                Terms.Keyword("H").Then(static _ => AstDefaultValueKind.HexString),
+                Terms.Keyword("B").Then(static _ => AstDefaultValueKind.BinaryString)))
+            .Then(static value => new AstDefaultValue(value.Item2, text: value.Item1));
+
+    private static readonly Parser<AstDefaultValue> NumberDefault =
+        Terms.Integer().Then(static number => new AstDefaultValue(AstDefaultValueKind.Number, number: number));
+
+    private static readonly Parser<AstDefaultValue> IdentifierDefault =
+        SMIv2.Ident.Then(static text => new AstDefaultValue(AstDefaultValueKind.Identifier, text: text));
+
+    public static readonly Parser<AstDefaultValue> OTDefValPart =
         Terms.Keyword("DEFVAL").SkipAnd(SMIv2.Block(
             OneOf(
-                Capture(SMIv2.Block(SMIv2.Idents.Optional())),
-                AnyCharBefore(Terms.Char('}'))
+                BitsDefault,
+                ObjectIdentifierDefault,
+                BinaryDefault,
+                StringDefault,
+                NumberDefault,
+                IdentifierDefault
             ).ElseError("Expected DEFVAL value")
         )).WithName("OTDefValPart");
 
@@ -615,16 +757,17 @@ public class LeafObject(
             .AndSkip(Terms.Keyword("OBJECT-TYPE"))
             .And(SMIv2.OTSyntaxPart)
             .And(SMIv2.OTMiddlePart)
-            .AndSkip(OTDefValPart.ZeroOrOne())
+            .And(OTDefValPart.Optional().Then(static x => x.OrSome(null)))
             .And(SMIv2.OidAssignment)
             .Then(static x => new LeafObject(
-                x.Item1, x.Item4, x.Item2, x.Item3.Item1, x.Item3.Item2, x.Item3.Item3))
+                x.Item1, x.Item5, x.Item2, x.Item3, x.Item4))
             .WithName("LeafObject");
 }
 
 // SNMP `OBJECT-GROUP`
 // Note: Since we don't care about compliance, we cheat when parsing this
-public class MacroObjectGroup : ModuleItem {
+public class MacroObjectGroup : ModuleItem
+{
     private static readonly MacroObjectGroup instance = new();
 
     //  ObjectGroup = IDENT "OBJECT-GROUP"
@@ -638,13 +781,14 @@ public class MacroObjectGroup : ModuleItem {
             .AndSkip(Terms.Keyword("OBJECT-GROUP"))
             .AndSkip(AnyCharBefore(Literals.Text("::="), consumeDelimiter: true))
             .AndSkip(SMIv2.Block(AnyCharBefore(Terms.Char('}'))))
-            .Then(static x => instance)
+            .Then(static _ => instance)
             .WithName("ObjectGroup");
 }
 
 // SNMP `NOTIFICATION-GROUP`
 // Note: Since we don't care about compliance, we cheat when parsing this
-public class MacroNotificationGroup : ModuleItem {
+public class MacroNotificationGroup : ModuleItem
+{
     private static readonly MacroNotificationGroup instance = new();
 
     //  NotificationGroup = IDENT "NOTIFICATION-GROUP"
@@ -658,13 +802,14 @@ public class MacroNotificationGroup : ModuleItem {
             .AndSkip(Terms.Keyword("NOTIFICATION-GROUP"))
             .AndSkip(AnyCharBefore(Literals.Text("::="), consumeDelimiter: true))
             .AndSkip(SMIv2.Block(AnyCharBefore(Terms.Char('}'))))
-            .Then(static x => instance)
+            .Then(static _ => instance)
             .WithName("NotificationGroup");
 }
 
 // SNMP `MODULE-COMPLIANCE` macro
 // Note: Since we don't care about compliance, we cheat when parsing this
-public class MacroModuleCompliance : ModuleItem {
+public class MacroModuleCompliance : ModuleItem
+{
     private static readonly MacroModuleCompliance instance = new();
 
     //  ModuleCompliance = IDENT "MODULE-COMPLIANCE"
@@ -687,13 +832,14 @@ public class MacroModuleCompliance : ModuleItem {
             .AndSkip(Terms.Keyword("MODULE-COMPLIANCE"))
             .AndSkip(AnyCharBefore(Literals.Text("::="), consumeDelimiter: true))
             .AndSkip(SMIv2.Block(AnyCharBefore(Terms.Char('}'))))
-            .Then(static x => instance)
+            .Then(static _ => instance)
             .WithName("ModuleCompliance");
 }
 
 // SNMP `AGENT-CAPABILITIES` macro (RFC 2580)
 // We don't use this for code generation, so we skip it entirely.
-public class MacroAgentCapabilities : ModuleItem {
+public class MacroAgentCapabilities : ModuleItem
+{
     private static readonly MacroAgentCapabilities instance = new();
 
     //  AgentCapabilities = IDENT "AGENT-CAPABILITIES"
@@ -704,13 +850,14 @@ public class MacroAgentCapabilities : ModuleItem {
             .AndSkip(Terms.Keyword("AGENT-CAPABILITIES"))
             .AndSkip(AnyCharBefore(Literals.Text("::="), consumeDelimiter: true))
             .AndSkip(SMIv2.Block(AnyCharBefore(Terms.Char('}'))))
-            .Then(static x => instance)
+            .Then(static _ => instance)
             .WithName("AgentCapabilities");
 }
 
 // SNMPv1 `TRAP-TYPE` macro (RFC 1215)
 // Legacy construct; we skip it but still need to consume it to avoid parse errors.
-public class MacroTrapType : ModuleItem {
+public class MacroTrapType : ModuleItem
+{
     private static readonly MacroTrapType instance = new();
 
     //  TrapType = IDENT "TRAP-TYPE"
@@ -724,6 +871,6 @@ public class MacroTrapType : ModuleItem {
             .AndSkip(Terms.Keyword("TRAP-TYPE"))
             .AndSkip(AnyCharBefore(Literals.Text("::="), consumeDelimiter: true))
             .AndSkip(Terms.Integer())
-            .Then(static x => instance)
+            .Then(static _ => instance)
             .WithName("TrapType");
 }

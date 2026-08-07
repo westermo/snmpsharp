@@ -57,7 +57,7 @@ public class SourceGeneratorIntegrationTests
     }
 
     [Test]
-    public async Task GeneratedNotification_CanBeParsedFromTopLevel()
+    public async Task GeneratedNotification_CanBeParsedFromTrapPdu()
     {
         var linkUp = new LinkUp
         {
@@ -65,9 +65,9 @@ public class SourceGeneratorIntegrationTests
             IfIndex = new Integer32(2),
             IfOperStatus = new Integer32(3)
         };
-        var oids = linkUp.ToDictionary().AsReadOnly();
-        var @new = global::Snmp.Iso.Id.ParseNotifications(oids).First();
-        await Assert.That(@new).IsTypeOf<LinkUp>();
+        var pdu = linkUp.ToTrapPdu();
+        var parsed = global::Snmp.Iso.Id.ParseNotifications(pdu).First();
+        await Assert.That(parsed).IsEquivalentTo(linkUp);
     }
 
     [Test]
@@ -91,6 +91,82 @@ public class SourceGeneratorIntegrationTests
         await Assert.That(roundTripped.Count).IsEqualTo(values.Count);
         await Assert.That(roundTripped[new Oid("1.3.6.1.4.1.16177.2.4.1.1.1.3.1")])
             .IsEqualTo(new OctetString("eth0"));
+    }
+
+    [Test]
+    public async Task GeneratedTable_RetainsPartialRowsAndOmitsMissingColumns()
+    {
+        var values = new Dictionary<Oid, AsnType>
+        {
+            [new Oid("1.3.6.1.4.1.16177.2.4.1.1.1.2.1")] = new Integer32(10)
+        };
+
+        var entries = IfRefTable.Parse(values);
+
+        await Assert.That(entries).IsNotNull();
+        await Assert.That(entries).HasSingleItem();
+        await Assert.That(entries[0].IndexIndex).IsEqualTo(1u);
+        await Assert.That(entries[0].ifName).IsNull();
+        await Assert.That(entries[0].ToDictionary()).HasSingleItem();
+    }
+
+    [Test]
+    public async Task GeneratedTable_RejectsInvalidIndexOidWithoutThrowing()
+    {
+        var values = new Dictionary<Oid, AsnType>
+        {
+            [new Oid("1.3.6.1.4.1.16177.2.4.1.1.1.2.1.99")] = new Integer32(10)
+        };
+
+        var entries = IfRefTable.Parse(values);
+
+        await Assert.That(entries).IsNotNull();
+        await Assert.That(entries).IsEmpty();
+    }
+
+    [Test]
+    public async Task GeneratedNotification_PreservesRequiredObjectOrderInVarBinds()
+    {
+        var linkUp = new LinkUp
+        {
+            IfAdminStatus = new Integer32(1),
+            IfIndex = new Integer32(2),
+            IfOperStatus = new Integer32(3)
+        };
+        var bindings = new VbCollection();
+
+        linkUp.Populate(bindings);
+
+        await Assert.That(bindings.Count).IsEqualTo(3);
+        await Assert.That(bindings[0].Oid).IsEquivalentTo(new Oid("1.3.6.1.2.1.2.2.1.1"));
+        await Assert.That(bindings[1].Oid).IsEquivalentTo(new Oid("1.3.6.1.2.1.2.2.1.7"));
+        await Assert.That(bindings[2].Oid).IsEquivalentTo(new Oid("1.3.6.1.2.1.2.2.1.8"));
+        await Assert.That(LinkUp.Parse(bindings)).IsEquivalentTo(linkUp);
+    }
+
+    [Test]
+    public async Task GeneratedNotification_RejectsMissingRequiredObjects()
+    {
+        var bindings = new VbCollection
+        {
+            new Vb(new Oid("1.3.6.1.2.1.2.2.1.1"), new Integer32(2))
+        };
+
+        await Assert.That(LinkUp.Parse(bindings)).IsNull();
+    }
+
+    [Test]
+    public async Task GeneratedNotification_DistinguishesRepeatedObjectOccurrences()
+    {
+        var source = FindGeneratedSource("public class CustomNotification : ISnmpNotification<CustomNotification>");
+
+        await Assert.That(source.Contains("public required Integer32 CustomValue;", StringComparison.Ordinal)).IsTrue();
+        await Assert.That(source.Contains("public required Integer32 CustomValue2;", StringComparison.Ordinal))
+            .IsTrue();
+        await Assert.That(source.Contains("values.Add(CustomValueId, CustomValue);", StringComparison.Ordinal))
+            .IsTrue();
+        await Assert.That(source.Contains("values.Add(CustomValue2Id, CustomValue2);", StringComparison.Ordinal))
+            .IsTrue();
     }
 
     [Test]

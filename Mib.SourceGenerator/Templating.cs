@@ -26,6 +26,55 @@ public static class Templating
         ];
     }
 
+    public static string? DefaultFactory(MibLeaf leaf)
+    {
+        if (leaf.DefaultValue is not { } value)
+        {
+            return null;
+        }
+
+        var asnType = leaf.Type.AsAsnType();
+        return (leaf.Type.Kind, value.Kind) switch
+        {
+            (TypeKind.Integer32 or TypeKind.Integer32Enum, MibDefaultValueKind.Number) =>
+                $"new {asnType}({value.Number!.Value})",
+            (TypeKind.Unsigned32 or TypeKind.Gauge32 or TypeKind.TimeTicks, MibDefaultValueKind.Number) =>
+                $"new {asnType}({value.Number!.Value}u)",
+            (TypeKind.OctetString or TypeKind.Opaque or TypeKind.IpAddress, MibDefaultValueKind.Octets) =>
+                $"new {asnType}({ByteArrayLiteral(value.Octets)})",
+            (TypeKind.ObjectIdentifier, MibDefaultValueKind.ObjectIdentifier) =>
+                $"new Oid({UintArrayLiteral(value.ObjectIdentifier)})",
+            (TypeKind.Bits, MibDefaultValueKind.Bits) =>
+                $"new OctetString({ByteArrayLiteral(BitsToOctets(leaf.Type, value))})",
+            _ => null
+        };
+    }
+
+    private static IReadOnlyList<byte> BitsToOctets(MibType type, MibDefaultValue value)
+    {
+        IReadOnlyDictionary<string, long> bitValues =
+            type.Values ?? new Dictionary<string, long>();
+        var selectedBits = value.Names.Select(name => bitValues[name]).ToArray();
+        if (selectedBits.Length == 0)
+        {
+            return [];
+        }
+
+        var result = new byte[selectedBits.Max(bit => (int)(bit / 8) + 1)];
+        foreach (var bit in selectedBits)
+        {
+            result[(int)(bit / 8)] |= (byte)(1 << (int)(7 - bit % 8));
+        }
+
+        return result;
+    }
+
+    private static string ByteArrayLiteral(IEnumerable<byte> values) =>
+        $"new byte[] {{ {string.Join(", ", values.Select(value => value.ToString()))} }}";
+
+    private static string UintArrayLiteral(IEnumerable<uint> values) =>
+        $"new uint[] {{ {string.Join(", ", values.Select(value => $"{value}u"))} }}";
+
     public static string[] TableEntry(string accessibility, MibTable table, string ns)
     {
         var typeName = table.EntryType();
@@ -52,7 +101,7 @@ public static class Templating
             [
                 "",
                 .. DocComment($"Column #{i + 1}", col.Description),
-                $"public required {col.Type.AsAsnType()} {col.Ident.CSharpName(strip)};",
+                $"public {col.Type.AsAsnType()}? {col.Ident.CSharpName(strip)};",
             ]).Indent(),
             "",
             .. IndexedParse(table).Indent(),
@@ -82,12 +131,21 @@ public static class Templating
             {
                 null =>
                 [
-                    $"var index{index.Ident.CSharpName(strip)} = ({index.Type.AsUintType()})index[1..(int)(1+index[0])].ToArray();",
-                    "index = index[(int)(1+index[0])..];"
+                    "if (index.Length == 0) return null;",
+                    $"var {index.Ident.CSharpName(strip)}Length = index[0];",
+                    $"if ({index.Ident.CSharpName(strip)}Length > index.Length - 1) return null;",
+                    $"var index{index.Ident.CSharpName(strip)} = ({index.Type.AsUintType()})index[1..(int)(1 + {index.Ident.CSharpName(strip)}Length)].ToArray();",
+                    $"index = index[(int)(1 + {index.Ident.CSharpName(strip)}Length)..];"
                 ],
-                1 => [$"var index{index.Ident.CSharpName(strip)} = index[0];", "index = index[1..];"],
+                1 =>
+                [
+                    "if (index.Length < 1) return null;",
+                    $"var index{index.Ident.CSharpName(strip)} = index[0];",
+                    "index = index[1..];"
+                ],
                 _ => (string[])
                 [
+                    $"if (index.Length < {index.Type.UintCount}) return null;",
                     $"var index{index.Ident.CSharpName(strip)} = ({index.Type.AsUintType()})index[..(int){index.Type.UintCount}].ToArray();",
                     $"index = index[(int){index.Type.UintCount}..];"
                 ]
@@ -100,23 +158,23 @@ public static class Templating
             $"public static {typeName}? Parse(ReadOnlySpan<uint> index, IReadOnlyDictionary<uint, AsnType> values)",
             "{",
             .. indexPart.Indent(),
+            "if (!index.IsEmpty) return null;",
             "",
-            .. table.Columns.SelectMany((col, i) =>
-            {
-                var colName = col.Ident.CSharpName(strip);
-                return new[]
-                {
-                    $"if(!values.TryGetValue({col.Ident.Oid.Last()}, out var _{colName}) || _{colName} is not {col.Type.AsAsnType()} {colName}) return null;",
-                };
-            }).Indent(),
-            "",
-            $"\treturn new {typeName}()",
+            $"\tvar entry = new {typeName}()",
             "\t{",
             .. table.Index.Select(x =>
                 $"\t\tIndex{x.Ident.CSharpName(strip)} = index{x.Ident.CSharpName(strip)},"),
-            .. table.Columns.Select(x =>
-                $"\t\t{x.Ident.CSharpName(strip)} = {x.Ident.CSharpName(strip)},"),
             "\t};",
+            "",
+            .. table.Columns.Select(col =>
+            {
+                var name = col.Ident.CSharpName(strip);
+                var valueName = $"value{name}";
+                return
+                    $"if (values.TryGetValue({col.Ident.Oid.Last()}, out var _{name}) && _{name} is {col.Type.AsAsnType()} {valueName}) entry.{name} = {valueName};";
+            }),
+            "",
+            "\treturn entry;",
             "}"
         ];
     }
@@ -154,9 +212,18 @@ public static class Templating
             "{",
             "\tvar indexOid = new List<uint>();",
             .. indexParts.Indent(),
-            .. table.Columns.Select(col =>
-                $"\tresult[new Oid((uint[])[..Oid, 1, {col.Ident.Oid.Last()}, ..indexOid])] = {col.Ident.CSharpName(strip)};"
-            ),
+            .. table.Columns.SelectMany(col =>
+            {
+                var name = col.Ident.CSharpName(strip);
+                var valueName = $"value{name}";
+                return (string[])
+                [
+                    $"\tif ({name} is {{ }} {valueName})",
+                    "\t{",
+                    $"\t\tresult[new Oid((uint[])[..Oid, 1, {col.Ident.Oid.Last()}, ..indexOid])] = {valueName};",
+                    "\t}"
+                ];
+            }),
             "}"
         ];
     }

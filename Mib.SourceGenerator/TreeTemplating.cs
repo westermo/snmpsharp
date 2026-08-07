@@ -36,18 +36,16 @@ internal static class TreeTemplating
             var parentNamespace = OidTreeNaming.NamespaceFor(node.Parent!);
             var name = OidTreeNaming.TypeName(node);
             var valueTypeName = $"{parentNamespace}.{name}";
-            if (emitted.Add(valueTypeName) && compilation.GetTypeByMetadataName(valueTypeName) is null)
+            if (!emitted.Add(valueTypeName) || compilation.GetTypeByMetadataName(valueTypeName) is not null) continue;
+            var folder = node.Item switch
             {
-                var folder = node.Item switch
-                {
-                    MibTable => "Tables",
-                    MibNotification => "Notifications",
-                    _ => "Leafs"
-                };
-                yield return new GeneratedSource(
-                    HintName(parentNamespace, name, folder),
-                    string.Join("\n", ValueType(parentNamespace, name, node)));
-            }
+                MibTable => "Tables",
+                MibNotification => "Notifications",
+                _ => "Leafs"
+            };
+            yield return new GeneratedSource(
+                HintName(parentNamespace, name, folder),
+                string.Join("\n", ValueType(parentNamespace, name, node)));
         }
     }
 
@@ -124,6 +122,12 @@ internal static class TreeTemplating
             .. BranchIdentifier(node, name, @namespace),
         ];
 
+        var defaultFactory = Templating.DefaultFactory(leaf);
+        if (defaultFactory is not null)
+        {
+            lines.Add($"\t\tpublic static {leaf.Type.AsAsnType()} CreateDefaultValue() => {defaultFactory};");
+        }
+
         if (!hasTableAncestor)
         {
             lines.AddRange(Templating.DocComment(oid + ".0").Indent().Indent());
@@ -199,6 +203,7 @@ internal static class TreeTemplating
     public static string[] Parse(MibTable table, string name)
     {
         var typeName = table.EntryType();
+        var columnArcs = string.Join(", ", table.Columns.Select(column => $"{column.Ident.Oid.Last()}u"));
         var hasVariableLengthIndex = table.Index.Any(x => x.Type.UintCount is null);
         // For fixed-length indexes we can compute the exact expected OID depth.
         // For variable-length indexes (OctetString, OID, etc.) the depth varies
@@ -214,8 +219,11 @@ internal static class TreeTemplating
             "\t// OID layout: Oid.1.<column>.<index...>",
             "\tvar entryDepth = Oid.Length + 1;",
             depthCheck,
+            $"\tvar columns = new HashSet<uint> {{ {columnArcs} }};",
             "\tvar relevantValues = values",
-            "\t\t.Where(kv => kv.Key.Length >= minDepth && Oid.IsRootOf(kv.Key));",
+            "\t\t.Where(kv => kv.Key.Length >= minDepth",
+            "\t\t\t&& Oid.IsRootOf(kv.Key)",
+            "\t\t\t&& columns.Contains(kv.Key.ToArray()[entryDepth]));",
             "",
             "\tvar entries = new Dictionary<Oid, Dictionary<uint, AsnType>>();",
             "",
@@ -267,18 +275,19 @@ internal static class TreeTemplating
 
         yield return
         [
-            "public static IEnumerable<object> ParseNotifications(IReadOnlyDictionary<Oid, AsnType> values)",
+            "public static IEnumerable<object> ParseNotifications(Pdu pdu)",
             "{",
+            "\tif (pdu.Type is not (PduType.V2Trap or PduType.Inform)) yield break;",
             .. notificationTypeNames.SelectMany(child => new[]
             {
-                $"if(values.ContainsKey({child}.Oid))",
+                $"if(pdu.TrapObjectID.Equals({child}.Oid))",
                 "{",
-                $"\t if({child}.Parse(values) is {{}} parsed) yield return parsed;",
+                $"\t if({child}.Parse(pdu.VbList) is {{}} parsed) yield return parsed;",
                 "}"
             }.Indent()),
             .. namespaces.SelectMany(ns => new[]
             {
-                $"foreach(var parsed in global::{OidTreeNaming.NamespaceFor(ns)}.Id.ParseNotifications(values))",
+                $"foreach(var parsed in global::{OidTreeNaming.NamespaceFor(ns)}.Id.ParseNotifications(pdu))",
                 "{",
                 "\tyield return parsed;",
                 "}"
@@ -314,6 +323,12 @@ internal static class TreeTemplating
 
         if (node.Item is MibLeaf leaf)
         {
+            var defaultFactory = Templating.DefaultFactory(leaf);
+            if (defaultFactory is not null)
+            {
+                yield return $"\tpublic static {leaf.Type.AsAsnType()} CreateDefaultValue() => {defaultFactory};";
+            }
+
             yield return
                 $"\tpublic static {leaf.Type.AsAsnType()}? Parse(IReadOnlyDictionary<Oid, AsnType> values) => values.TryGetValue(Oid, out var value) ? value  as {leaf.Type.AsAsnType()} : null;";
         }
@@ -334,6 +349,9 @@ internal static class TreeTemplating
         MibNotification notification)
     {
         var oid = DotForm(node);
+        var objects = notification.Objects
+            .Select((obj, index) => (Object: obj, Name: NotificationObjectName(notification, obj, index, name)))
+            .ToArray();
 
 
         return
@@ -349,43 +367,39 @@ internal static class TreeTemplating
             $"\tpublic class {name} : ISnmpNotification<{name}>",
             "\t{",
             .. BranchIdentifier(node, name, @namespace),
-            .. notification.Objects.Select(obj =>
-                $"\t\tpublic required {obj.Type.AsAsnType()} {obj.Ident.CSharpName(name)}; "),
-            .. notification.Objects.Select(obj =>
-                $"\t\tprivate static Oid {obj.Ident.CSharpName(name)}Id = {obj.Ident.AsLiteral()}; "),
-
-            $"\t\tpublic static {name}? Parse(IReadOnlyDictionary<Oid, AsnType> values)",
+            .. objects.Select(obj =>
+                $"\t\tpublic required {obj.Object.Type.AsAsnType()} {obj.Name}; "),
+            .. objects.Select(obj =>
+                $"\t\tprivate static Oid {obj.Name}Id = {obj.Object.Ident.AsLiteral()}; "),
+            "",
+            $"\t\tpublic static {name}? Parse(VbCollection values)",
             "\t\t{",
-            .. notification.Objects.Select(obj =>
-            {
-                var objName = obj.Ident.CSharpName(name);
-                var lName = objName.Replace(objName[0], char.ToLower(objName[0]));
-                return
-                    $"\t\t\tif(!values.TryGetValue({objName}Id, out var _{lName}) || _{lName} is not {obj.Type.AsAsnType()} {lName}) return null;";
-            }),
+            $"\t\t\tif (values.Count < {objects.Length}) return null;",
+            .. objects.Select((obj, index) =>
+                $"\t\t\tif (values[{index}].Oid is not {{ }} oid{index} || !oid{index}.Equals({obj.Name}Id) || values[{index}].Value is not {obj.Object.Type.AsAsnType()} value{index}) return null;"),
             $"\t\t\treturn new {name}(){{",
-            .. notification.Objects.Select(obj =>
-            {
-                var objName = obj.Ident.CSharpName(name);
-                var lName = objName.Replace(objName[0], char.ToLower(objName[0]));
-                return
-                    $"\t\t\t\t{objName} = {lName},";
-            }),
+            .. objects.Select((obj, index) => $"\t\t\t\t{obj.Name} = value{index},"),
             "\t\t\t};",
             "\t\t}",
-            "\t\tpublic void Populate(IDictionary<Oid, AsnType> values)",
+            "",
+            "\t\tpublic void Populate(VbCollection values)",
             "\t\t{",
-            "\t\t\tvalues[Oid] = new Integer32(0);",
-            .. notification.Objects.Select(obj =>
-            {
-                var objName = obj.Ident.CSharpName(name);
-                return $"\t\t\tvalues[{objName}Id] = {objName};";
-            }),
+            .. objects.Select(obj => $"\t\t\tvalues.Add({obj.Name}Id, {obj.Name});"),
             "\t\t}",
             "",
             "\t}",
             "}"
         ];
+    }
+
+    private static string NotificationObjectName(MibNotification notification, MibLeaf obj, int index,
+        string notificationName)
+    {
+        var baseName = obj.Ident.CSharpName(notificationName);
+        var occurrence = notification.Objects
+            .Take(index + 1)
+            .Count(previous => previous.Ident.Equals(obj.Ident));
+        return occurrence == 1 ? baseName : $"{baseName}{occurrence}";
     }
 
     private static string OidExpression(OidTreeNode node)

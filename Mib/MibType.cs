@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using SnmpSharpNet.Mib.Ast;
 
 namespace SnmpSharpNet.Mib;
 
@@ -113,16 +114,32 @@ public enum TypeKind
     TimeTicks
 }
 
+public sealed class MibTextualConvention(
+    string name,
+    string? displayHint,
+    SMIv2Status status,
+    string description,
+    string? reference)
+{
+    public string Name { get; } = name;
+    public string? DisplayHint { get; } = displayHint;
+    public SMIv2Status Status { get; } = status;
+    public string Description { get; } = description;
+    public string? Reference { get; } = reference;
+}
+
 public class MibType(
     TypeKind kind,
     Refinement? refinement = null,
     IReadOnlyDictionary<string, long>? values = null,
-    string? name = null
+    string? name = null,
+    MibTextualConvention? textualConvention = null
 ) : IEquatable<MibType> {
     public TypeKind Kind { get; } = kind;
     public Refinement? Refinement { get; } = refinement;
     public IReadOnlyDictionary<string, long>? Values { get; } = values;
     public string? Name { get; } = name;
+    public MibTextualConvention? TextualConvention { get; } = textualConvention;
 
     public static MibType FromAst(Ast.AstType type)
     {
@@ -130,7 +147,8 @@ public class MibType(
             type.Kind ?? throw new ArgumentException($"Type '{type}' is unresolved", nameof(type)),
             type.Refinement,
             type.Values?.ToDictionary(v => v.Item1.ToString(), v => v.Item2),
-            type.Name?.ToString());
+            type.Name?.ToString(),
+            null);
     }
 
     public static readonly MibType Integer32 = new(TypeKind.Integer32, Refinement.AllValues);
@@ -208,7 +226,7 @@ public class MibType(
             (min, max)
         ], isSize);
         var merged = Refinement.Union(current, next);
-        return new MibType(Kind, merged, Values, Name);
+        return new MibType(Kind, merged, Values, Name, TextualConvention);
     }
 
     public override string ToString() =>
@@ -236,10 +254,23 @@ public class MibType(
         return Kind == other.Kind
             && Equals(Refinement, other.Refinement)
             && Values.DictEquals(other.Values)
-            && Name == other.Name;
+            && Name == other.Name
+            && TextualConventionEquals(TextualConvention, other.TextualConvention);
     }
 
     public override bool Equals(object? obj) => Equals(obj as MibType);
 
-    public override int GetHashCode() => HashCode.Combine(Kind, Refinement, Values?.Count ?? 0, Name);
+    public override int GetHashCode() => HashCode.Combine(
+        HashCode.Combine(Kind, Refinement, Values?.Count ?? 0, Name),
+        TextualConvention?.Name);
+
+    private static bool TextualConventionEquals(MibTextualConvention? left, MibTextualConvention? right) =>
+        left is null
+            ? right is null
+            : right is not null &&
+              left.Name == right.Name &&
+              left.DisplayHint == right.DisplayHint &&
+              left.Status == right.Status &&
+              left.Description == right.Description &&
+              left.Reference == right.Reference;
 }

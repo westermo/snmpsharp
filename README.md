@@ -50,3 +50,33 @@ Snmp.Iso.Std.Iso8802.Ieee802dot1.Ieee802dot1mibs.Lldp.Objects.LocalSystemData
 Snmp.Iso.Org.Dod.Internet.Private.Enterprises.WestermoOid.Common
     .WestermoInterface.WmoInterfaceObjects.IfRefTable.FromValues(values);
 ```
+
+## Generated binding mechanics
+
+Generated table entries preserve the distinction between an SNMP row's identity and the bindings returned for that row:
+
+- `INDEX` members are emitted as C# `required` fields. They are decoded from the instance OID and are needed to recreate the row's OIDs.
+- Non-index table columns are nullable. An agent or a retrieval operation is not required to provide every column, so `Table.Parse(...)` retains partial rows and assigns only bindings that are present with the expected ASN type.
+- `Populate(IDictionary<Oid, AsnType>)` writes only non-null table columns. This makes partial rows safe to round-trip without inventing values for absent bindings.
+
+`NOTIFICATION-TYPE` objects have different semantics. Every object occurrence in its MIB `OBJECTS` clause is required and ordered, including repeated occurrences of the same object. Generated notification members therefore remain `required`, and parsing rejects a missing object or an object with the wrong ASN type.
+
+Use the `VbCollection` overloads to preserve notification order and duplicates:
+
+```csharp
+var bindings = new VbCollection();
+linkUp.Populate(bindings); // Adds MIB OBJECTS in declaration order.
+
+LinkUp? parsed = LinkUp.Parse(bindings);
+```
+
+These overloads operate on the MIB-defined notification-object sequence. For a decoded SNMPv2 Trap or Inform, use the generated namespace helper with the decoded `Pdu`: `Id.ParseNotifications(pdu)`. It identifies the notification from `pdu.TrapObjectID` and binds its remaining `pdu.VbList` in order; `Pdu.Decode` has already separated the protocol-defined `sysUpTime.0` and `snmpTrapOID.0` varbinds. The older dictionary notification-discovery overload is obsolete because it requires a non-standard synthetic notification-OID dictionary key and cannot preserve ordering or duplicate OIDs.
+
+`DEFVAL` is parsed as structured data and validated against its resolved syntax, including integer ranges, named enum/BITS values, OCTET STRING sizes, and object identifiers. `Counter32` and `Counter64` defaults are rejected. When a validated default can be represented by an SNMP runtime type, the generated leaf includes an explicit `CreateDefaultValue()` factory. It always returns a fresh mutable ASN.1 value:
+
+```csharp
+Integer32 first = MyMib.SomeLeaf.CreateDefaultValue();
+Integer32 second = MyMib.SomeLeaf.CreateDefaultValue();
+// first and second have the same value but are different instances.
+```
+

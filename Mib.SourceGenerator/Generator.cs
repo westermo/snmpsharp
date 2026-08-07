@@ -34,20 +34,39 @@ public sealed class SnmpGenerator : IIncrementalGenerator
                     .Where(x => !x.CollectError(errors))
                     .ToDictionary(x => x.Name, x => x);
 
-                var modules = asts.ConstructModules();
-                if (!modules.IsOk)
+                var definitionDiagnostics = MibSemanticValidator.ValidateDefinitions(asts).ToArray();
+                errors.AddRange(definitionDiagnostics.Where(diagnostic =>
+                    diagnostic.Severity == DiagnosticSeverity.Error));
+                warnings = warnings.Concat(definitionDiagnostics.Where(diagnostic =>
+                    diagnostic.Severity != DiagnosticSeverity.Error));
+
+                ValuedDictionary<string, MibModule>? resolvedModules = null;
+                if (errors.Count == 0)
                 {
-                    errors.Add(modules.Diagnostic);
+                    var modules = asts.ConstructModules();
+                    if (!modules.IsOk)
+                    {
+                        errors.Add(modules.Diagnostic);
+                    }
+                    else
+                    {
+                        resolvedModules = new ValuedDictionary<string, MibModule>(modules.Value);
+                        var semanticDiagnostics = MibSemanticValidator.Validate(asts, resolvedModules).ToArray();
+                        errors.AddRange(semanticDiagnostics.Where(diagnostic =>
+                            diagnostic.Severity == DiagnosticSeverity.Error));
+                        warnings = warnings.Concat(semanticDiagnostics.Where(diagnostic =>
+                            diagnostic.Severity != DiagnosticSeverity.Error));
+                    }
                 }
 
                 if (errors.Count > 0)
                 {
-                    return (null, [.. errors]);
+                    return (null, [.. warnings, .. errors]);
                 }
 
                 // Return warnings together with the successful result so they can be emitted
                 var allDiagnostics = warnings.ToImmutableArray();
-                return (new ValuedDictionary<string, MibModule>(modules.Value),
+                return (resolvedModules!,
                     allDiagnostics.Length > 0 ? allDiagnostics : null);
             });
 

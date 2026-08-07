@@ -1,27 +1,40 @@
 DOC-TEST-MIB DEFINITIONS ::= BEGIN
 
 docTest OBJECT IDENTIFIER ::= { iso 9999 }
+docTestNotifications OBJECT IDENTIFIER ::= { docTest 0 }
+
+CustomDisplay ::= TEXTUAL-CONVENTION
+    DISPLAY-HINT "d-2"
+    STATUS      current
+    DESCRIPTION "A custom display value."
+    REFERENCE   "RFC custom"
+    SYNTAX      Integer32 (0..10000)
 
 customTable OBJECT-TYPE
     SYNTAX      SEQUENCE OF CustomEntry
+    UNITS       "rows"
     MAX-ACCESS  not-accessible
     STATUS      current
     DESCRIPTION
         "Table description"
+    REFERENCE   "Table reference"
     ::= { docTest 1 }
 
 customEntry OBJECT-TYPE
     SYNTAX      CustomEntry
+    UNITS       "entries"
     MAX-ACCESS  not-accessible
     STATUS      current
     DESCRIPTION
         "Row description"
+    REFERENCE   "Row reference"
     INDEX       { customIndex }
     ::= { customTable 1 }
 
 CustomEntry ::= SEQUENCE {
     customIndex Integer32,
-    customValue Integer32
+    customValue Integer32,
+    customOther Integer32
 }
 
 customIndex OBJECT-TYPE
@@ -36,7 +49,8 @@ customIndex OBJECT-TYPE
     ::= { customEntry 1 }
 
 customValue OBJECT-TYPE
-    SYNTAX      Integer32
+    SYNTAX      CustomDisplay
+    UNITS       "widgets"
     MAX-ACCESS  read-only
     STATUS      current
     DESCRIPTION
@@ -44,6 +58,22 @@ customValue OBJECT-TYPE
          <tag> & value
 
              deeper"
+    REFERENCE   "Column reference"
+    DEFVAL      { 250 }
     ::= { customEntry 2 }
+
+customOther OBJECT-TYPE
+    SYNTAX      Integer32
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "The second ordered column."
+    ::= { customEntry 3 }
+
+customNotification NOTIFICATION-TYPE
+    OBJECTS     { customValue, customValue }
+    STATUS      current
+    DESCRIPTION
+        "A notification with two occurrences of the same object."
+    ::= { docTestNotifications 2 }
 
 END
