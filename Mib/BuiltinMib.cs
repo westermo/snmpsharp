@@ -1,6 +1,4 @@
-using System;
 using System.Collections.Generic;
-using System.Linq;
 
 namespace SnmpSharpNet.Mib;
 
@@ -38,7 +36,15 @@ public class BuiltinMib : IMibThatExports
                 var oid = kvp.Value.Item1;
                 var ident = new MibItemIdent(oid, [$"<{name}>", kvp.Key]);
                 oidByName[kvp.Key] = ident;
-                Items[ident] = new MibLeaf(ident, kvp.Value.Item2, Ast.SMIv2Accessibility.ReadOnly);
+                Items[ident] = new MibLeaf(
+                    ident,
+                    kvp.Value.Item2,
+                    new MibObjectMetadata(
+                        Ast.SMIv2Accessibility.ReadOnly,
+                        Ast.SMIv2Status.Current,
+                        null,
+                        null,
+                        null));
             }
         }
     }

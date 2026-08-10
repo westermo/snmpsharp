@@ -12,7 +12,8 @@ namespace SnmpSharpNet.Mib.SourceGenerator;
 
 public record struct GenMibDefinition(
     string Name, Location Location,
-    Result<ModuleDefinition> Module
+    Result<ModuleDefinition> Module,
+    IReadOnlyList<Diagnostic>? Warnings
 ) {
     public static GenMibDefinition FromAdditionalText(AdditionalText text, CancellationToken ct)
     {
@@ -21,24 +22,27 @@ public record struct GenMibDefinition(
         var source = text.GetText(ct)!;
 
         Result<ModuleDefinition> module;
+        List<Diagnostic>? warnings = null;
         try
         {
             var mod = MibParser.ParseAst(source.ToString(), name);
-            if (mod.Identifier == name)
+            if (mod.Identifier != name)
             {
-                module = mod;
+                // The filename doesn't match the module identifier.
+                // Use the parsed identifier as the canonical name and emit a warning
+                // so that MIBs shipped in packages with arbitrary filenames still resolve.
+                warnings = [Diagnostic.Create(
+                    Diagnostics.FilenameMismatch, loc,
+                    $"File '{name}.mib' contains module '{mod.Identifier}'; using module identifier as key.")];
+                name = mod.Identifier.ToString();
             }
-            else
-            {
-                module = Diagnostic.Create(Diagnostics.ParseError, loc, $"Parsed '{name}.mib' but got module '{mod.Identifier.ToString()}'");
-            }
-
+            module = mod;
         }
         catch (ParseException e)
         {
             module = Diagnostic.Create(Diagnostics.ParseError, loc.WithPosition(e.Position), e.Message);
         }
-        return new GenMibDefinition(name, loc, module);
+        return new GenMibDefinition(name, loc, module, warnings);
     }
 
     public readonly bool CollectError(List<Diagnostic> errors)
@@ -81,51 +85,6 @@ public class ValuedDictionary<T, U> : Dictionary<T, U>, IEquatable<ValuedDiction
             foreach (var kvp in this)
                 hash += HashCode.Combine(kvp.Key, kvp.Value);
             return hash;
-        }
-    }
-}
-
-
-
-public record struct PartialClass(string Accessibility, string? Namespace, string TypeName, Location Location)
-{
-    public static PartialClass FromSymbol(ISymbol symbol)
-    {
-        var accessibility = symbol.DeclaredAccessibility switch {
-            Microsoft.CodeAnalysis.Accessibility.Public => "public",
-            Microsoft.CodeAnalysis.Accessibility.Private => "private",
-            Microsoft.CodeAnalysis.Accessibility.Internal => "internal",
-            Microsoft.CodeAnalysis.Accessibility.Protected => "protected",
-            Microsoft.CodeAnalysis.Accessibility.ProtectedOrInternal => "protected internal",
-            Microsoft.CodeAnalysis.Accessibility.ProtectedAndInternal => "private protected",
-            _ => "private"
-        };
-
-        var cns = symbol.ContainingNamespace;
-        var ns = cns.IsGlobalNamespace ? null : cns.ToDisplayString();
-        return new(accessibility, ns, symbol.Name, symbol.Locations.First());
-    }
-
-    public readonly string[] AsLiteral(string impls, IEnumerable<string> body)
-    {
-        string[] decl = [
-            $"{Accessibility} partial class {TypeName}{impls}",
-            $"{{",
-            ..body.Select(x => $"\t{x}"),
-            $"}}",
-        ];
-        if (Namespace is {})
-        {
-            return [
-                $"namespace {Namespace}",
-                $"{{",
-                ..decl.Select(x => $"\t{x}"),
-                $"}}"
-            ];
-        }
-        else
-        {
-            return decl;
         }
     }
 }

@@ -20,7 +20,7 @@
         <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="$(CompilerVersion)"/>
         <PackageVersion Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="$(CompilerVersion)"/>
         <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="$(CompilerVersion)"/>
-        <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="$(CompilerVersion)"/>
+        <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0"/>
         <PackageVersion Include="Microsoft.Build.Framework" Version="$(BuildVersion)"/>
         <PackageVersion Include="Microsoft.Build.Tasks.Core" Version="$(BuildVersion)"/>
         <PackageVersion Include="Microsoft.Build.Utilities.Core" Version="$(BuildVersion)"/>

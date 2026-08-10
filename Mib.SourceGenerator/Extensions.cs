@@ -4,13 +4,12 @@ using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
 using Parlot;
-
 using CodeSpan = Microsoft.CodeAnalysis.Text.TextSpan;
 
 namespace SnmpSharpNet.Mib.SourceGenerator;
 
-static class Extensions
-{    
+internal static class Extensions
+{
     extension(MibItemIdent ident)
     {
         public string AsLiteral()
@@ -23,11 +22,29 @@ static class Extensions
     {
         public string EntryType()
         {
-            return $"{table.Ident.Name}Entry";
+            return $"{table.Ident.CSharpName(null)}Entry";
         }
-        public string TableType()
+
+        public string CommonPrefix()
         {
-            return $"{table.EntryType()}[]";
+            return table.Index.Select(x => x.Ident.CSharpName(null))
+                .Concat(table.Columns.Select(s => s.Ident.CSharpName(null)))
+                .Append(table.Ident.CSharpName(null))
+                .CommonPrefix();
+        }
+    }
+
+    extension(MibItemIdent ident)
+    {
+        public string CSharpName(string? trimStart)
+        {
+            var baseName = OidTreeNaming.FormatIdentifier(ident.Name ?? "Unnamed");
+            if (trimStart is null || string.IsNullOrEmpty(trimStart) || trimStart == baseName ||
+                !baseName.StartsWith(trimStart) ||
+                trimStart.Length > baseName.Length) return baseName;
+
+            var trimmed = baseName.Substring(trimStart.Length, baseName.Length - trimStart.Length);
+            return char.IsDigit(trimmed[0]) ? baseName : trimmed;
         }
     }
 
@@ -69,6 +86,46 @@ static class Extensions
         {
             return lines.Select(line => $"\t{line}");
         }
+
+        public string CommonPrefix()
+        {
+            var array = lines.ToArray();
+
+            if (array.Length == 0)
+                return string.Empty;
+
+            var count = 0;
+            var first = array[0];
+            if (first is null) return string.Empty;
+            while (array.All(line => line is not null && line.Length > count && line[count] == first[count]))
+            {
+                count++;
+            }
+
+            return first.Substring(0, count);
+        }
+    }
+
+    extension(string str1)
+    {
+        public string CommonPrefix(string str2)
+        {
+            if (string.IsNullOrEmpty(str1) || string.IsNullOrEmpty(str2)) return string.Empty;
+            var count = 0;
+            for (int i = 0; i < str1.Length && i < str2.Length; i++)
+            {
+                if (str1[i] == str2[i])
+                {
+                    count++;
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            return str1.Substring(0, count);
+        }
     }
 
     extension(Location location)
@@ -77,6 +134,7 @@ static class Extensions
         {
             return Location.Create(text.Path, new CodeSpan(), new LinePositionSpan());
         }
+
         public Location WithPosition(TextPosition position)
         {
             var linePos = new LinePosition(position.Line, position.Column);
@@ -109,6 +167,6 @@ static class Extensions
             {
                 return Diagnostic.Create(Diagnostics.MibNotFound, Location.None, e.Message);
             }
-        } 
+        }
     }
 }

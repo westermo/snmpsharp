@@ -1,0 +1,31 @@
+services:
+  integration-tests:
+    build:
+      context: ../..
+      dockerfile: tests/SnmpSharpNet.Mib.SourceGenerator.IntegrationTests/docker/Dockerfile.tests
+    networks:
+      - snmp-integration
+
+  net-snmp:
+    image: alpine:3.21
+    depends_on:
+      integration-tests:
+        condition: service_started
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        apk add --no-cache net-snmp-tools
+        sleep 2
+        while true; do
+          snmptrap -v 2c -c public integration-tests:1162 12345 1.3.6.1.6.3.1.1.5.4 \
+            1.3.6.1.2.1.2.2.1.1.99 i 99 \
+            1.3.6.1.2.1.2.2.1.7.99 i 1 \
+            1.3.6.1.2.1.2.2.1.8.99 i 1
+          sleep 1
+        done
+    networks:
+      - snmp-integration
+
+networks:
+  snmp-integration:

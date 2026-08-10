@@ -26,8 +26,8 @@ public static class MibParser
 
 
         var parseStack = new Stack<object>();
-        context.OnEnterParser += (parser, ctx) => { parseStack.Push(parser); };
-        context.OnExitParser += (parser, ctx) => parseStack.Pop();
+        context.OnEnterParser += (parser, _) => { parseStack.Push(parser); };
+        context.OnExitParser += (_, _) => parseStack.Pop();
 
         CompiledModule.TryParse(context, out var result, out var maybeError);
         if (maybeError is { } error)

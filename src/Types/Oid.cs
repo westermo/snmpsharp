@@ -43,13 +43,11 @@ public sealed class Oid : AsnType, ICloneable, IComparable, IEnumerable<uint>
     {
         get
         {
-            switch (_data)
+            return _data switch
             {
-                case null:
-                    return 0;
-                default:
-                    return _data.Length;
-            }
+                null => 0,
+                _ => _data.Length
+            };
         }
     }
 
@@ -86,6 +84,13 @@ public sealed class Oid : AsnType, ICloneable, IComparable, IEnumerable<uint>
             return _data[index];
         }
     }
+
+    public Span<uint> AsSpan()
+    {
+        return _data == null ? throw new OverflowException("Oid does not have backing data") : _data.AsSpan();
+    }
+
+    public ReadOnlySpan<uint> this[Range index] => _data.AsSpan()[index];
 
     /// <summary>Duplicate current object.</summary>
     /// <returns> Returns a new Oid copy of self cast as Object.</returns>
@@ -783,9 +788,9 @@ public sealed class Oid : AsnType, ICloneable, IComparable, IEnumerable<uint>
     /// <param name="oid1">Oid class to add id to</param>
     /// <param name="id">Id value to add to the oid</param>
     /// <returns>New Oid class with id added to the Oid class.</returns>
-    public static Oid? operator +(Oid? oid1, uint id)
+    public static Oid operator +(Oid oid1, uint id)
     {
-        return oid1 is null ? null : new Oid(oid1) { id };
+        return new Oid(oid1) { id };
     }
 
     /// <summary>
@@ -899,6 +904,7 @@ public sealed class Oid : AsnType, ICloneable, IComparable, IEnumerable<uint>
 
         return written + slice;
     }
+
     /// <summary>
     ///     Encode single OID instance value
     /// </summary>
