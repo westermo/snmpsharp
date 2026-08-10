@@ -7,6 +7,7 @@
         <IncludeBuildOutput>false</IncludeBuildOutput>
         <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
         <PackageId>Westermo.$(AssemblyName)</PackageId>
+        <IsAotCompatible>false</IsAotCompatible>
     </PropertyGroup>
 
     <ItemGroup>

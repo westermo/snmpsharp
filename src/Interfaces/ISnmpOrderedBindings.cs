@@ -23,7 +23,7 @@ public static class SnmpOrderedBindingsExtensions
         {
             var pdu = new Pdu(PduType.V2Trap);
             bindings.Populate(pdu.VbList);
-            pdu.TrapObjectID = TSelf.Oid;
+            pdu.TrapObjectID = bindings.InstanceOid;
             return pdu;
         }
     }

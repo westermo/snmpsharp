@@ -70,7 +70,30 @@ linkUp.Populate(bindings); // Adds MIB OBJECTS in declaration order.
 LinkUp? parsed = LinkUp.Parse(bindings);
 ```
 
+## Interoperability tests
+
+The source-generator integration tests receive an SNMPv2 `linkUp` trap emitted by
+Net-SNMP in Docker, decode its BER payload, and parse it through the generated
+IF-MIB notification type. Its table-column varbinds use instance OIDs with the
+row index suffix (for example, `ifIndex.99`), as required by SMIv2. Run them with:
+
+```powershell
+.\tests\SnmpSharpNet.Mib.SourceGenerator.IntegrationTests\run-integration-tests.ps1
+```
+
 These overloads operate on the MIB-defined notification-object sequence. For a decoded SNMPv2 Trap or Inform, use the generated namespace helper with the decoded `Pdu`: `Id.ParseNotifications(pdu)`. It identifies the notification from `pdu.TrapObjectID` and binds its remaining `pdu.VbList` in order; `Pdu.Decode` has already separated the protocol-defined `sysUpTime.0` and `snmpTrapOID.0` varbinds. The older dictionary notification-discovery overload is obsolete because it requires a non-standard synthetic notification-OID dictionary key and cannot preserve ordering or duplicate OIDs.
+
+Generated notifications retain their instance-OID suffix in `NotificationIndexes`
+and expose it as `InstanceOid`. `ToTrapPdu()` uses that instance OID as the
+`snmpTrapOID`, allowing generated notifications to round-trip. If the MIB resolves
+all notification columns to one table, the generator also emits typed properties
+for that table's `INDEX` members. A name that would collide with a
+notification-object property is prefixed with `Index`, so IF-MIB `linkUp` exposes
+`IndexIfIndex` alongside its `IfIndex` value.
+
+Notification parsing accepts a complete `Pdu`. It reads indexes from an instance
+`snmpTrapOID`; for interoperating with senders such as Net-SNMP that use a bare
+notification OID, it falls back to a common validated table-varbind suffix.
 
 `DEFVAL` is parsed as structured data and validated against its resolved syntax, including integer ranges, named enum/BITS values, OCTET STRING sizes, and object identifiers. `Counter32` and `Counter64` defaults are rejected. When a validated default can be represented by an SNMP runtime type, the generated leaf includes an explicit `CreateDefaultValue()` factory. It always returns a fresh mutable ASN.1 value:
 
@@ -79,4 +102,3 @@ Integer32 first = MyMib.SomeLeaf.CreateDefaultValue();
 Integer32 second = MyMib.SomeLeaf.CreateDefaultValue();
 // first and second have the same value but are different instances.
 ```
-

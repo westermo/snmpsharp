@@ -78,7 +78,7 @@ public static class Templating
     public static string[] TableEntry(string accessibility, MibTable table, string ns)
     {
         var typeName = table.EntryType();
-        var strip = typeName.Replace("TableEntry", string.Empty);
+        var strip = table.CommonPrefix();
         var oid = string.Join(".", table.Ident.Oid.Append(1u));
         return
         [
@@ -93,7 +93,7 @@ public static class Templating
             .. table.Index.SelectMany((idx, i) => (string[])
             [
                 "",
-                .. DocComment($"Index #{i + 1}", idx.Leaf.Description),
+                .. DocComment($"Index #{i + 1}", idx.Ident.Name, idx.Leaf.Description, strip),
                 $"public required {idx.Type.AsUintType()} Index{idx.Ident.CSharpName(strip)};",
             ]).Indent(),
             "",
@@ -114,51 +114,15 @@ public static class Templating
     public static string[] IndexedParse(MibTable table)
     {
         var typeName = table.EntryType();
-        var strip = typeName.Replace("TableEntry", string.Empty);
-        var indexPart = table.Index.SelectMany((index, _) =>
-        {
-            if (index.IsImplied && index.Type.UintCount is null)
-            {
-                // IMPLIED: no length prefix, consume the rest of the index span
-                return (string[])
-                [
-                    $"var index{index.Ident.CSharpName(strip)} = ({index.Type.AsUintType()})index.ToArray();",
-                    "index = default;"
-                ];
-            }
-
-            return index.Type.UintCount switch
-            {
-                null =>
-                [
-                    "if (index.Length == 0) return null;",
-                    $"var {index.Ident.CSharpName(strip)}Length = index[0];",
-                    $"if ({index.Ident.CSharpName(strip)}Length > index.Length - 1) return null;",
-                    $"var index{index.Ident.CSharpName(strip)} = ({index.Type.AsUintType()})index[1..(int)(1 + {index.Ident.CSharpName(strip)}Length)].ToArray();",
-                    $"index = index[(int)(1 + {index.Ident.CSharpName(strip)}Length)..];"
-                ],
-                1 =>
-                [
-                    "if (index.Length < 1) return null;",
-                    $"var index{index.Ident.CSharpName(strip)} = index[0];",
-                    "index = index[1..];"
-                ],
-                _ => (string[])
-                [
-                    $"if (index.Length < {index.Type.UintCount}) return null;",
-                    $"var index{index.Ident.CSharpName(strip)} = ({index.Type.AsUintType()})index[..(int){index.Type.UintCount}].ToArray();",
-                    $"index = index[(int){index.Type.UintCount}..];"
-                ]
-            };
-        });
-
+        var strip = table.CommonPrefix();
+        var indexPart = IndexDecodeStatements(table, strip, "index", "return null;");
 
         return
         [
             $"public static {typeName}? Parse(ReadOnlySpan<uint> index, IReadOnlyDictionary<uint, AsnType> values)",
             "{",
             .. indexPart.Indent(),
-            "if (!index.IsEmpty) return null;",
+            "\tif (!index.IsEmpty) return null;",
             "",
             $"\tvar entry = new {typeName}()",
             "\t{",
@@ -172,17 +136,61 @@ public static class Templating
                 var valueName = $"value{name}";
                 return
                     $"if (values.TryGetValue({col.Ident.Oid.Last()}, out var _{name}) && _{name} is {col.Type.AsAsnType()} {valueName}) entry.{name} = {valueName};";
-            }),
+            }).Indent(),
             "",
             "\treturn entry;",
             "}"
         ];
     }
 
+    public static IEnumerable<string> IndexDecodeStatements(
+        MibTable table,
+        string strip,
+        string indexVariable,
+        string invalidIndexStatement)
+    {
+        return table.Index.SelectMany((index, _) =>
+        {
+            var indexName = index.Ident.CSharpName(strip);
+            if (index.IsImplied && index.Type.UintCount is null)
+            {
+                // IMPLIED: no length prefix, consume the rest of the index span
+                return (string[])
+                [
+                    $"var index{indexName} = {indexVariable}.ToArray(); //Implied index encountered, consumes the rest",
+                    $"{indexVariable} = default;"
+                ];
+            }
+
+            return index.Type.UintCount switch
+            {
+                null =>
+                [
+                    $"if ({indexVariable}.Length == 0) {invalidIndexStatement}",
+                    $"var {indexName}Length = {indexVariable}[0];",
+                    $"if ({indexName}Length > {indexVariable}.Length - 1) {invalidIndexStatement}",
+                    $"var index{indexName} = {indexVariable}[1..(int)(1 + {indexName}Length)].ToArray();",
+                    $"{indexVariable} = {indexVariable}[(int)(1 + {indexName}Length)..];"
+                ],
+                1 =>
+                [
+                    $"if ({indexVariable}.Length < 1) {invalidIndexStatement}",
+                    $"var index{indexName} = {indexVariable}[0];",
+                    $"{indexVariable} = {indexVariable}[1..];"
+                ],
+                _ => (string[])
+                [
+                    $"if ({indexVariable}.Length < {index.Type.UintCount}) {invalidIndexStatement}",
+                    $"var index{indexName} = {indexVariable}[..{index.Type.UintCount}].ToArray();",
+                    $"{indexVariable} = {indexVariable}[(int){index.Type.UintCount}..];"
+                ]
+            };
+        });
+    }
+
     public static string[] Populate(MibTable table)
     {
-        var typeName = table.EntryType();
-        var strip = typeName.Replace("TableEntry", string.Empty);
+        var strip = table.CommonPrefix();
         var indexParts = table.Index.SelectMany(index =>
         {
             if (index.IsImplied && index.Type.UintCount is null)

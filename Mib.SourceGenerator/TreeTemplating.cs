@@ -72,6 +72,7 @@ internal static class TreeTemplating
     {
         yield return "#nullable enable";
         yield return "using SnmpSharpNet;";
+        yield return "using System;";
         yield return "using System.Collections.Generic;";
         yield return "using System.CodeDom.Compiler;";
     }
@@ -275,25 +276,16 @@ internal static class TreeTemplating
 
         yield return
         [
-            "public static IEnumerable<object> ParseNotifications(Pdu pdu)",
+            "public static object? ParseNotification(Pdu pdu)",
             "{",
-            "\tif (pdu.Type is not (PduType.V2Trap or PduType.Inform)) yield break;",
-            .. notificationTypeNames.SelectMany(child => new[]
-            {
-                $"if(pdu.TrapObjectID.Equals({child}.Oid))",
-                "{",
-                $"\t if({child}.Parse(pdu.VbList) is {{}} parsed) yield return parsed;",
-                "}"
-            }.Indent()),
-            .. namespaces.SelectMany(ns => new[]
-            {
-                $"foreach(var parsed in global::{OidTreeNaming.NamespaceFor(ns)}.Id.ParseNotifications(pdu))",
-                "{",
-                "\tyield return parsed;",
-                "}"
-            }.Indent()),
+            "\tif (pdu.Type is not (PduType.V2Trap or PduType.Inform)) return null;",
+            "\tif (!Oid.IsRootOf(pdu.TrapObjectID)) return null;",
+            .. notificationTypeNames.Select(child =>
+                $"\t{{\tif({child}.Parse(pdu) is {{}} parsed) return parsed;}}"),
+            .. namespaces.Select(ns =>
+                $"\t{{\tif(global::{OidTreeNaming.NamespaceFor(ns)}.Id.ParseNotification(pdu) is {{}} parsed) return parsed;}}"),
             "",
-            "\tyield break;",
+            "\treturn null;",
             "}"
         ];
     }
@@ -350,11 +342,57 @@ internal static class TreeTemplating
     {
         var oid = DotForm(node);
         var objects = notification.Objects
-            .Select((obj, index) => (Object: obj, Name: NotificationObjectName(notification, obj, index, name)))
+            .Select((obj, index) => (
+                Object: obj,
+                Name: NotificationObjectName(notification, obj, index, name),
+                Table: ContainingTable(node, obj)))
             .ToArray();
+        var tables = objects
+            .Where(obj => obj.Table is not null)
+            .Select(obj => obj.Table!)
+            .Distinct()
+            .ToArray();
+        var tableObjects = objects
+            .Select((obj, index) => (Object: obj, Index: index))
+            .Where(obj => obj.Object.Table is not null)
+            .ToArray();
+        var tableGroups = tableObjects
+            .GroupBy(obj => obj.Object.Table!)
+            .ToArray();
+        var typedIndexProperties = tables.SelectMany(indexTable => NotificationIndexProperties(
+            indexTable,
+            [.. objects.Select(obj => obj.Name), "NotificationIndexes"]));
+        var notificationIndexAssignment = tableGroups.Length switch
+        {
+            0 => Enumerable.Empty<string>(),
+            1 =>
+            [
+                "\t\t\tif (trapIndexes.Length == 0)",
+                "\t\t\t{",
+                "\t\t\t\tnotificationIndexes = tableIndexes0;",
+                "\t\t\t}",
+                "\t\t\telse if (!tableIndexes0.SequenceEqual(notificationIndexes)) return null;"
+            ],
+            _ =>
+            [
+                "\t\t\tif (trapIndexes.Length == 0)",
+                "\t\t\t{",
+                .. tableGroups.Skip(1).Select((_, groupIndex) =>
+                    $"\t\t\t\tif (!tableIndexes0.SequenceEqual(tableIndexes{groupIndex + 1})) return null;"),
+                "\t\t\t\tnotificationIndexes = tableIndexes0;",
+                "\t\t\t}",
+                .. tableGroups.Select((_, groupIndex) =>
+                    $"\t\t\telse if (!tableIndexes{groupIndex}.SequenceEqual(notificationIndexes)) return null;")
+            ]
+        };
+        var tableIndexValidation = tableGroups.SelectMany((group, groupIndex) =>
+            new[] { $"\t\t\tvar tableIndexes{groupIndex} = indexes{group.First().Index};" }
+                .Concat(group.Skip(1).Select(obj =>
+                    $"\t\t\tif (!tableIndexes{groupIndex}.SequenceEqual(indexes{obj.Index})) return null;"))
+                .Append(
+                    $"\t\t\tif (!{NotificationIndexValidatorName(group.Key)}(tableIndexes{groupIndex})) return null;"));
 
-
-        return
+        List<string> lines =
         [
             .. CommonUsings(),
             "",
@@ -372,24 +410,130 @@ internal static class TreeTemplating
             .. objects.Select(obj =>
                 $"\t\tprivate static Oid {obj.Name}Id = {obj.Object.Ident.AsLiteral()}; "),
             "",
-            $"\t\tpublic static {name}? Parse(VbCollection values)",
+            "\t\tpublic uint[] NotificationIndexes { get; }",
+            "\t\tpublic Oid InstanceOid => new Oid((uint[])[.. Oid.ToArray(), .. NotificationIndexes]);",
+            "",
+            $"\t\tpublic {name}() : this([]) {{ }}",
+            "",
+            $"\t\tpublic {name}(ReadOnlySpan<uint> notificationIndexes)",
             "\t\t{",
+            "\t\t\tNotificationIndexes = [.. notificationIndexes];",
+            "\t\t}",
+            "",
+            .. tables.SelectMany(table => NotificationIndexValidator(table).Select(line => $"\t\t{line}")),
+            .. typedIndexProperties.Select(line => $"\t\t{line}"),
+            "",
+            $"\t\tpublic static {name}? Parse(Pdu pdu)",
+            "\t\t{",
+            "\t\t\tif (pdu.Type is not (PduType.V2Trap or PduType.Inform) || !Oid.IsRootOf(pdu.TrapObjectID)) return null;",
+            "\t\t\tvar trapIndexes = pdu.TrapObjectID[Oid.Length..];",
+            "\t\t\tvar values = pdu.VbList;",
             $"\t\t\tif (values.Count < {objects.Length}) return null;",
             .. objects.Select((obj, index) =>
-                $"\t\t\tif (values[{index}].Oid is not {{ }} oid{index} || !oid{index}.Equals({obj.Name}Id) || values[{index}].Value is not {obj.Object.Type.AsAsnType()} value{index}) return null;"),
-            $"\t\t\treturn new {name}(){{",
+                $"\t\t\tif (values[{index}].Oid is not {{ }} oid{index} || !{NotificationObjectOidMatch(obj, $"oid{index}")} || values[{index}].Value is not {obj.Object.Type.AsAsnType()} value{index}) return null;"),
+            "\t\t\tvar notificationIndexes = trapIndexes;",
+            .. tableObjects.Select(obj =>
+                $"\t\t\tvar indexes{obj.Index} = oid{obj.Index}[{obj.Object.Name}Id.Length..];"),
+            .. tableIndexValidation,
+            .. notificationIndexAssignment,
+            $"\t\t\treturn new {name}(notificationIndexes){{",
             .. objects.Select((obj, index) => $"\t\t\t\t{obj.Name} = value{index},"),
             "\t\t\t};",
             "\t\t}",
             "",
             "\t\tpublic void Populate(VbCollection values)",
             "\t\t{",
-            .. objects.Select(obj => $"\t\t\tvalues.Add({obj.Name}Id, {obj.Name});"),
+            .. tables.Select(table =>
+                $"\t\t\tif (!{NotificationIndexValidatorName(table)}(NotificationIndexes)) throw new InvalidOperationException(\"NotificationIndexes does not encode a valid {table.EntryType()} index.\");"),
+            .. objects.Select(obj =>
+                obj.Table is null
+                    ? $"\t\t\tvalues.Add({obj.Name}Id + 0u, {obj.Name});"
+                    : $"\t\t\tvalues.Add(new Oid((uint[])[.. {obj.Name}Id.ToArray(), .. NotificationIndexes]), {obj.Name});"),
             "\t\t}",
             "",
             "\t}",
             "}"
         ];
+
+        return [.. lines];
+    }
+
+    private static MibTable? ContainingTable(OidTreeNode node, MibLeaf leaf)
+    {
+        var root = node;
+        while (root.Parent is not null)
+        {
+            root = root.Parent;
+        }
+
+        var leafNode = root;
+        foreach (var arc in leaf.Ident.Oid)
+        {
+            if (!leafNode.Children.TryGetValue(arc, out leafNode))
+            {
+                return null;
+            }
+        }
+
+        return leafNode.AncestorsAndSelf()
+            .Select(ancestor => ancestor.Item)
+            .OfType<MibTable>()
+            .FirstOrDefault();
+    }
+
+    private static string NotificationObjectOidMatch(
+        (MibLeaf Object, string Name, MibTable? Table) obj,
+        string oidName)
+    {
+        if (obj.Table is null)
+        {
+            return $"{oidName}.Equals({obj.Name}Id + 0u)";
+        }
+
+        return $"({obj.Name}Id.IsRootOf({oidName}) && {oidName}.Length > {obj.Name}Id.Length)";
+    }
+
+    private static string NotificationIndexValidatorName(MibTable table) =>
+        $"ValidateIndexesFor{table.Ident.Name}";
+
+    private static IEnumerable<string> NotificationIndexValidator(MibTable table)
+    {
+        var strip = table.EntryType();
+        yield return $"private static bool {NotificationIndexValidatorName(table)}(ReadOnlySpan<uint> index)";
+        yield return "{";
+        foreach (var line in Templating.IndexDecodeStatements(table, strip, "index", "return false;"))
+        {
+            yield return $"\t{line}";
+        }
+
+        yield return "\treturn index.IsEmpty;";
+        yield return "}";
+    }
+
+    private static IEnumerable<string> NotificationIndexProperties(MibTable table, string[] objectNames)
+    {
+        var strip = table.CommonPrefix();
+        var order = 0;
+        foreach (var index in table.Index)
+        {
+            var name = index.Ident.CSharpName(strip);
+            if (string.IsNullOrEmpty(name)) name = "Id";
+            var propertyName = name;
+            while (objectNames.Contains(propertyName, StringComparer.Ordinal))
+            {
+                propertyName = $"Index{propertyName}";
+            }
+
+            var indexor = index.Type.UintCount switch
+            {
+                1 => $"{order}",
+                _ => $"{order}.."
+            };
+
+            yield return
+                $"public {index.Type.AsUintType()}? {propertyName} => NotificationIndexes.Length > {order} ? NotificationIndexes[{indexor}] : default;";
+            order++;
+        }
     }
 
     private static string NotificationObjectName(MibNotification notification, MibLeaf obj, int index,
@@ -399,7 +543,8 @@ internal static class TreeTemplating
         var occurrence = notification.Objects
             .Take(index + 1)
             .Count(previous => previous.Ident.Equals(obj.Ident));
-        return occurrence == 1 ? baseName : $"{baseName}{occurrence}";
+        var name = occurrence == 1 ? baseName : $"{baseName}{occurrence}";
+        return name.Equals("NotificationIndexes", StringComparison.Ordinal) ? $"Value{name}" : name;
     }
 
     private static string OidExpression(OidTreeNode node)

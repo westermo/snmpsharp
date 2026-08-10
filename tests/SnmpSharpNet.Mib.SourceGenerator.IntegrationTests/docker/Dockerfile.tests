@@ -1,0 +1,14 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0
+
+WORKDIR /src
+
+COPY Directory.Build.props Directory.Packages.props ./
+COPY src/ src/
+COPY Mib/ Mib/
+COPY Mib.SourceGenerator/ Mib.SourceGenerator/
+COPY tests/mibs/ tests/mibs/
+COPY tests/SnmpSharpNet.Mib.SourceGenerator.IntegrationTests/ tests/SnmpSharpNet.Mib.SourceGenerator.IntegrationTests/
+
+RUN dotnet restore tests/SnmpSharpNet.Mib.SourceGenerator.IntegrationTests/SnmpSharpNet.Mib.SourceGenerator.IntegrationTests.csproj
+
+ENTRYPOINT ["dotnet", "run", "--configuration", "Release", "--no-restore", "--project", "tests/SnmpSharpNet.Mib.SourceGenerator.IntegrationTests/SnmpSharpNet.Mib.SourceGenerator.IntegrationTests.csproj"]

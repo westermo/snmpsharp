@@ -25,6 +25,20 @@ public class SourceGeneratorIntegrationTests
         return Code.Single(source => source.Contains(typeDeclaration, StringComparison.Ordinal));
     }
 
+    private static Pdu TrapPdu(Oid trapObjectId, params Vb[] values)
+    {
+        var pdu = new Pdu(PduType.V2Trap)
+        {
+            TrapObjectID = trapObjectId
+        };
+        foreach (var value in values)
+        {
+            pdu.VbList.Add(value);
+        }
+
+        return pdu;
+    }
+
     [Test]
     public async Task GeneratedLeaf_ExposesParentRelativeOid()
     {
@@ -59,14 +73,16 @@ public class SourceGeneratorIntegrationTests
     [Test]
     public async Task GeneratedNotification_CanBeParsedFromTrapPdu()
     {
-        var linkUp = new LinkUp
+        var linkUp = new LinkUp([2])
         {
             IfAdminStatus = new Integer32(1),
             IfIndex = new Integer32(2),
             IfOperStatus = new Integer32(3)
         };
         var pdu = linkUp.ToTrapPdu();
-        var parsed = global::Snmp.Iso.Id.ParseNotifications(pdu).First();
+        var parsed = global::Snmp.Iso.Id.ParseNotification(pdu);
+
+        await Assert.That(pdu.TrapObjectID).IsEquivalentTo(new Oid("1.3.6.1.6.3.1.1.5.4.2"));
         await Assert.That(parsed).IsEquivalentTo(linkUp);
     }
 
@@ -127,7 +143,7 @@ public class SourceGeneratorIntegrationTests
     [Test]
     public async Task GeneratedNotification_PreservesRequiredObjectOrderInVarBinds()
     {
-        var linkUp = new LinkUp
+        var linkUp = new LinkUp([2])
         {
             IfAdminStatus = new Integer32(1),
             IfIndex = new Integer32(2),
@@ -138,10 +154,68 @@ public class SourceGeneratorIntegrationTests
         linkUp.Populate(bindings);
 
         await Assert.That(bindings.Count).IsEqualTo(3);
-        await Assert.That(bindings[0].Oid).IsEquivalentTo(new Oid("1.3.6.1.2.1.2.2.1.1"));
-        await Assert.That(bindings[1].Oid).IsEquivalentTo(new Oid("1.3.6.1.2.1.2.2.1.7"));
-        await Assert.That(bindings[2].Oid).IsEquivalentTo(new Oid("1.3.6.1.2.1.2.2.1.8"));
-        await Assert.That(LinkUp.Parse(bindings)).IsEquivalentTo(linkUp);
+        await Assert.That(bindings[0].Oid).IsEquivalentTo(new Oid("1.3.6.1.2.1.2.2.1.1.2"));
+        await Assert.That(bindings[1].Oid).IsEquivalentTo(new Oid("1.3.6.1.2.1.2.2.1.7.2"));
+        await Assert.That(bindings[2].Oid).IsEquivalentTo(new Oid("1.3.6.1.2.1.2.2.1.8.2"));
+        await Assert.That(LinkUp.Parse(TrapPdu(LinkUp.Oid, [.. bindings]))).IsEquivalentTo(linkUp);
+    }
+
+    [Test]
+    public async Task GeneratedNotification_ParsesTableColumnInstanceOids()
+    {
+        var bindings = new VbCollection
+        {
+            new Vb(new Oid("1.3.6.1.2.1.2.2.1.1.99"), new Integer32(99)),
+            new Vb(new Oid("1.3.6.1.2.1.2.2.1.7.99"), new Integer32(1)),
+            new Vb(new Oid("1.3.6.1.2.1.2.2.1.8.99"), new Integer32(1))
+        };
+
+        var notification = LinkUp.Parse(TrapPdu(LinkUp.Oid, [.. bindings]));
+
+        await Assert.That(notification).IsNotNull();
+        await Assert.That(notification!.NotificationIndexes).IsEquivalentTo(new uint[] { 99 });
+        await Assert.That(notification.Index).IsEqualTo(99u);
+        await Assert.That(notification.IfIndex).IsEqualTo(new Integer32(99));
+        await Assert.That(notification.IfAdminStatus).IsEqualTo(new Integer32(1));
+        await Assert.That(notification.IfOperStatus).IsEqualTo(new Integer32(1));
+    }
+
+    [Test]
+    public async Task GeneratedNotification_RejectsInconsistentTableInstanceIndexes()
+    {
+        var bindings = new VbCollection
+        {
+            new Vb(new Oid("1.3.6.1.2.1.2.2.1.1.99"), new Integer32(99)),
+            new Vb(new Oid("1.3.6.1.2.1.2.2.1.7.100"), new Integer32(1)),
+            new Vb(new Oid("1.3.6.1.2.1.2.2.1.8.99"), new Integer32(1))
+        };
+
+        await Assert.That(LinkUp.Parse(TrapPdu(LinkUp.Oid, [.. bindings]))).IsNull();
+    }
+
+    [Test]
+    public async Task GeneratedNotification_RejectsTrapObjectIndexDifferentFromTableInstances()
+    {
+        var pdu = TrapPdu(
+            LinkUp.Oid + 100u,
+            new Vb(new Oid("1.3.6.1.2.1.2.2.1.1.99"), new Integer32(99)),
+            new Vb(new Oid("1.3.6.1.2.1.2.2.1.7.99"), new Integer32(1)),
+            new Vb(new Oid("1.3.6.1.2.1.2.2.1.8.99"), new Integer32(1)));
+
+        await Assert.That(LinkUp.Parse(pdu)).IsNull();
+    }
+
+    [Test]
+    public async Task GeneratedNotification_RejectsTableColumnsWithoutAnInstanceIndex()
+    {
+        var bindings = new VbCollection
+        {
+            new Vb(new Oid("1.3.6.1.2.1.2.2.1.1"), new Integer32(99)),
+            new Vb(new Oid("1.3.6.1.2.1.2.2.1.7.99"), new Integer32(1)),
+            new Vb(new Oid("1.3.6.1.2.1.2.2.1.8.99"), new Integer32(1))
+        };
+
+        await Assert.That(LinkUp.Parse(TrapPdu(LinkUp.Oid, [.. bindings]))).IsNull();
     }
 
     [Test]
@@ -152,7 +226,7 @@ public class SourceGeneratorIntegrationTests
             new Vb(new Oid("1.3.6.1.2.1.2.2.1.1"), new Integer32(2))
         };
 
-        await Assert.That(LinkUp.Parse(bindings)).IsNull();
+        await Assert.That(LinkUp.Parse(TrapPdu(LinkUp.Oid, [.. bindings]))).IsNull();
     }
 
     [Test]
@@ -163,10 +237,15 @@ public class SourceGeneratorIntegrationTests
         await Assert.That(source.Contains("public required Integer32 CustomValue;", StringComparison.Ordinal)).IsTrue();
         await Assert.That(source.Contains("public required Integer32 CustomValue2;", StringComparison.Ordinal))
             .IsTrue();
-        await Assert.That(source.Contains("values.Add(CustomValueId, CustomValue);", StringComparison.Ordinal))
+        await Assert.That(source.Contains(
+                "values.Add(new Oid((uint[])[.. CustomValueId.ToArray(), .. NotificationIndexes]), CustomValue);",
+                StringComparison.Ordinal))
             .IsTrue();
-        await Assert.That(source.Contains("values.Add(CustomValue2Id, CustomValue2);", StringComparison.Ordinal))
+        await Assert.That(source.Contains(
+                "values.Add(new Oid((uint[])[.. CustomValue2Id.ToArray(), .. NotificationIndexes]), CustomValue2);",
+                StringComparison.Ordinal))
             .IsTrue();
+        await Assert.That(source.Contains("public uint? Index", StringComparison.Ordinal)).IsTrue();
     }
 
     [Test]
