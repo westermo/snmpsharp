@@ -33,27 +33,35 @@ public static class HashAlgorithmExtensions
             Span<byte> span = stackalloc byte[hashAlgorithm.HashSize / 8];
             return hashAlgorithm.TryComputeHash(toCompute, span, out _)
                    &&
-                   span[..expectedHash.Length].SequenceEqual(expectedHash);
+                   CryptographicOperations.FixedTimeEquals(span[..expectedHash.Length], expectedHash);
         }
 
         public void HashMegabyte(ReadOnlySpan<byte> toCompute)
         {
             const int bufferSize = 8192;
-            var buf = ArrayPool<byte>.Shared.Rent(bufferSize);
-            /* Use while loop until we've done 1 Megabyte */
-            var num = 0;
-            var count = 0;
-            while (count < 1048576)
+            const int totalLength = 1048576;
+            var patternLength = toCompute.Length;
+            // The buffer holds the password repeated end-to-end; since its content is periodic with period
+            // patternLength, any window [offset, offset + bufferSize) equals the next bufferSize bytes of the
+            // infinite password stream that starts at position offset. This avoids a per-byte modulo loop.
+            var filledLength = bufferSize + patternLength;
+            var buf = ArrayPool<byte>.Shared.Rent(filledLength);
+            var span = buf.AsSpan(0, filledLength);
+            for (var written = 0; written < filledLength; written += patternLength)
             {
-                for (int index = 0; index < bufferSize /*0x40*/; ++index)
-                    buf[index] = toCompute[num++ % toCompute.Length];
+                var n = Math.Min(patternLength, filledLength - written);
+                toCompute[..n].CopyTo(span[written..]);
+            }
 
-                hashAlgorithm.TransformBlock(buf, 0, bufferSize, null, 0);
-                count += bufferSize;
+            var offset = 0;
+            for (var count = 0; count < totalLength; count += bufferSize)
+            {
+                hashAlgorithm.TransformBlock(buf, offset, bufferSize, null, 0);
+                offset = (offset + bufferSize) % patternLength;
             }
 
             hashAlgorithm.TransformFinalBlock(buf, 0, 0);
-            Array.Clear(buf, 0, bufferSize);
+            CryptographicOperations.ZeroMemory(span);
             ArrayPool<byte>.Shared.Return(buf);
         }
     }

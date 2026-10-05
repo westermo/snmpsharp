@@ -15,6 +15,7 @@
 // 
 
 using System;
+using System.Buffers;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -158,17 +159,32 @@ public class UdpTransport : IDisposable
         var netPeer = new IPEndPoint(peer, port);
 
         _socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReceiveTimeout, timeout);
+        var inbuffer = ArrayPool<byte>.Shared.Rent(MaxDatagramSize);
+        try
+        {
+            return ReceiveLoop(_socket, buffer, bufferLength, retries, netPeer, inbuffer, peer.AddressFamily);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(inbuffer);
+        }
+    }
+
+    private const int MaxDatagramSize = 64 * 1024;
+
+    private byte[] ReceiveLoop(Socket socket, byte[] buffer, int bufferLength, int retries, IPEndPoint netPeer,
+        byte[] inbuffer, AddressFamily addressFamily)
+    {
         var recv = 0;
         var retry = 0;
-        var inbuffer = new byte[64 * 1024];
         EndPoint remote =
-            new IPEndPoint(peer.AddressFamily == AddressFamily.InterNetwork ? IPAddress.Any : IPAddress.IPv6Any, 0);
+            new IPEndPoint(addressFamily == AddressFamily.InterNetwork ? IPAddress.Any : IPAddress.IPv6Any, 0);
         while (true)
         {
             try
             {
-                _socket.SendTo(buffer, bufferLength, SocketFlags.None, netPeer);
-                recv = _socket.ReceiveFrom(inbuffer, ref remote);
+                socket.SendTo(buffer, bufferLength, SocketFlags.None, netPeer);
+                recv = socket.ReceiveFrom(inbuffer, 0, MaxDatagramSize, SocketFlags.None, ref remote);
             }
             catch (SocketException ex)
             {
@@ -275,7 +291,8 @@ public class UdpTransport : IDisposable
 
         // _socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReceiveTimeout, _requestState.Timeout);
 
-        _inBuffer = new byte[64 * 1024]; // create incoming data buffer
+        if (_inBuffer.Length != MaxDatagramSize)
+            _inBuffer = new byte[MaxDatagramSize]; // allocated once; reuse is safe because _busy serializes requests
 
         SendToBegin(); // Send the request
 
