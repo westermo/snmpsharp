@@ -15,6 +15,7 @@
 // 
 
 using System;
+using System.Buffers;
 using System.Text;
 
 namespace SnmpSharpNet;
@@ -99,6 +100,8 @@ namespace SnmpSharpNet;
 /// </remarks>
 public class SnmpV3Packet : SnmpPacket, IEquatable<SnmpV3Packet>
 {
+    private const int StackAllocThreshold = 1024;
+
     /// <summary>
     ///     Maximum message size. In the discovery packet, set it to the maximum acceptable size = 64KB. The Agent will
     ///     return the maximum value it is ready to handle, so you should stick with that value in all following
@@ -569,15 +572,23 @@ public class SnmpV3Packet : SnmpPacket, IEquatable<SnmpV3Packet>
             if (USM.AuthenticationParameters.Length != expectedLength)
                 throw new SnmpAuthenticationException("Invalid authentication parameter field length.");
 
-            Span<byte> bufferWithoutAuthParams = stackalloc byte[buffer.Length];
-            buffer.CopyTo(bufferWithoutAuthParams);
-            for (int i = USM.AuthParamRange.Start.Value; i < USM.AuthParamRange.End.Value; i++)
+            byte[]? rented = null;
+            Span<byte> bufferWithoutAuthParams = buffer.Length <= StackAllocThreshold
+                ? stackalloc byte[StackAllocThreshold]
+                : (rented = ArrayPool<byte>.Shared.Rent(buffer.Length));
+            bufferWithoutAuthParams = bufferWithoutAuthParams[..buffer.Length];
+            try
             {
-                bufferWithoutAuthParams[i] = 0x00;
-            }
+                buffer.CopyTo(bufferWithoutAuthParams);
+                bufferWithoutAuthParams[USM.AuthParamRange].Clear();
 
-            if (!USM.IsAuthentic(authenticationKey, bufferWithoutAuthParams))
-                throw new SnmpAuthenticationException("Authentication of the incoming packet failed.");
+                if (!USM.IsAuthentic(authenticationKey, bufferWithoutAuthParams))
+                    throw new SnmpAuthenticationException("Authentication of the incoming packet failed.");
+            }
+            finally
+            {
+                if (rented != null) ArrayPool<byte>.Shared.Return(rented);
+            }
         }
 
         // Decode ScopedPdu if it is privacy protected and packet is not a discovery packet

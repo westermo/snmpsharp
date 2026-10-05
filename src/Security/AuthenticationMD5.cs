@@ -46,11 +46,8 @@ public class AuthenticationMD5 : IAuthenticationDigest
     public byte[] Authenticate(ReadOnlySpan<byte> authenticationSecret, ReadOnlySpan<byte> engineId,
         ReadOnlySpan<byte> wholeMessage)
     {
-        var result = new byte[authenticationLength];
         var authKey = PasswordToKey(authenticationSecret, engineId);
-        using var sha = new HMACMD5(authKey);
-        sha.WithHashed(wholeMessage, (span, _) => { span[..authenticationLength].CopyTo(result); });
-        return result;
+        return Authenticate(authKey, wholeMessage);
     }
 
     /// <summary>
@@ -61,11 +58,9 @@ public class AuthenticationMD5 : IAuthenticationDigest
     /// <returns>Authentication parameters value</returns>
     public byte[] Authenticate(ReadOnlySpan<byte> authKey, ReadOnlySpan<byte> wholeMessage)
     {
-        var result = new byte[authenticationLength];
-
-        using var sha = new HMACMD5(authKey.ToArray());
-        sha.WithHashed(wholeMessage, (span, _) => { span[..authenticationLength].CopyTo(result); });
-        return result;
+        Span<byte> hash = stackalloc byte[HMACMD5.HashSizeInBytes];
+        HMACMD5.HashData(authKey, wholeMessage, hash);
+        return hash[..authenticationLength].ToArray();
     }
 
     /// <summary>
@@ -96,8 +91,10 @@ public class AuthenticationMD5 : IAuthenticationDigest
     public bool AuthenticateIncomingMsg(ReadOnlySpan<byte> authKey, ReadOnlySpan<byte> authenticationParameters,
         ReadOnlySpan<byte> wholeMessage)
     {
-        using var md5 = new HMACMD5(authKey.ToArray());
-        return md5.CompareHashed(wholeMessage, authenticationParameters);
+        Span<byte> hash = stackalloc byte[HMACMD5.HashSizeInBytes];
+        HMACMD5.HashData(authKey, wholeMessage, hash);
+        return CryptographicOperations.FixedTimeEquals(hash[..authenticationParameters.Length],
+            authenticationParameters);
     }
 
     /// <summary>
@@ -112,6 +109,11 @@ public class AuthenticationMD5 : IAuthenticationDigest
         // key length has to be at least 8 bytes long (RFC3414)
         if (userPassword.Length < 8)
             throw new SnmpAuthenticationException("Secret key is too short.");
+        return LocalizedKeyCache.GetOrDerive(nameof(AuthenticationMD5), userPassword, engineID, DeriveKey);
+    }
+
+    private static byte[] DeriveKey(ReadOnlySpan<byte> userPassword, ReadOnlySpan<byte> engineID)
+    {
         using var sha = MD5.Create();
         sha.HashMegabyte(userPassword);
         var digest = sha.Hash.AsSpan();

@@ -109,6 +109,11 @@ public class AuthenticationSHA224 : IAuthenticationDigest
         // key length has to be at least 8 bytes long (RFC3414)
         if (userPassword.Length < 8)
             throw new SnmpAuthenticationException("Secret key is too short.");
+        return LocalizedKeyCache.GetOrDerive(nameof(AuthenticationSHA224), userPassword, engineID, DeriveKey);
+    }
+
+    private static byte[] DeriveKey(ReadOnlySpan<byte> userPassword, ReadOnlySpan<byte> engineID)
+    {
         using var sha = SHA224.Create();
         sha.HashMegabyte(userPassword);
         var digest = sha.Hash.AsSpan();

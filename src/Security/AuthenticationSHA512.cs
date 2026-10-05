@@ -59,11 +59,9 @@ public class AuthenticationSHA512 : IAuthenticationDigest
     /// <returns>Authentication parameters value</returns>
     public byte[] Authenticate(ReadOnlySpan<byte> authKey, ReadOnlySpan<byte> wholeMessage)
     {
-        var result = new byte[authenticationLength];
-
-        using var sha = new HMACSHA512(authKey.ToArray());
-        sha.WithHashed(wholeMessage, (span, _) => { span[..authenticationLength].CopyTo(result); });
-        return result;
+        Span<byte> hash = stackalloc byte[HMACSHA512.HashSizeInBytes];
+        HMACSHA512.HashData(authKey, wholeMessage, hash);
+        return hash[..authenticationLength].ToArray();
     }
 
     /// <summary>
@@ -94,8 +92,10 @@ public class AuthenticationSHA512 : IAuthenticationDigest
     public bool AuthenticateIncomingMsg(ReadOnlySpan<byte> authKey, ReadOnlySpan<byte> authenticationParameters,
         ReadOnlySpan<byte> wholeMessage)
     {
-        using var sha = new HMACSHA512(authKey.ToArray());
-        return sha.CompareHashed(wholeMessage, authenticationParameters);
+        Span<byte> hash = stackalloc byte[HMACSHA512.HashSizeInBytes];
+        HMACSHA512.HashData(authKey, wholeMessage, hash);
+        return CryptographicOperations.FixedTimeEquals(hash[..authenticationParameters.Length],
+            authenticationParameters);
     }
 
     /// <summary>
@@ -110,6 +110,11 @@ public class AuthenticationSHA512 : IAuthenticationDigest
         // key length has to be at least 8 bytes long (RFC3414)
         if (userPassword.Length < 8)
             throw new SnmpAuthenticationException("Secret key is too short.");
+        return LocalizedKeyCache.GetOrDerive(nameof(AuthenticationSHA512), userPassword, engineID, DeriveKey);
+    }
+
+    private static byte[] DeriveKey(ReadOnlySpan<byte> userPassword, ReadOnlySpan<byte> engineID)
+    {
         using var sha = SHA512.Create();
         sha.HashMegabyte(userPassword);
         var digest = sha.Hash.AsSpan();
