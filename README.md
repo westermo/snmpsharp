@@ -95,6 +95,16 @@ Notification parsing accepts a complete `Pdu`. It reads indexes from an instance
 `snmpTrapOID`; for interoperating with senders such as Net-SNMP that use a bare
 notification OID, it falls back to a common validated table-varbind suffix.
 
+For interoperability, parsing is lenient in two further ways:
+
+- Scalar notification objects are accepted both with the SMIv2 `.0` instance suffix
+  and without it (some agents send e.g. `lldpStatsRemTablesInserts` for
+  `lldpRemTablesChange`). `Populate` always emits the `.0` instance.
+- Declared objects are matched in MIB order, but unrelated varbinds before, between
+  or after them (e.g. `sysUpTime.0`, `sysDescr.0`) are tolerated. They are kept in
+  original order in the notification's `AdditionalBindings` and appended after the
+  declared objects by `Populate`.
+
 `DEFVAL` is parsed as structured data and validated against its resolved syntax, including integer ranges, named enum/BITS values, OCTET STRING sizes, and object identifiers. `Counter32` and `Counter64` defaults are rejected. When a validated default can be represented by an SNMP runtime type, the generated leaf includes an explicit `CreateDefaultValue()` factory. It always returns a fresh mutable ASN.1 value:
 
 ```csharp
