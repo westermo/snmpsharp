@@ -14,9 +14,34 @@ internal sealed class GeneratedSource(string hintName, string source)
 
 internal static class TreeTemplating
 {
-    public static IEnumerable<GeneratedSource> Generate(OidTreeNode root, Compilation compilation)
+    public static IEnumerable<GeneratedSource> Generate(OidTreeNode root, Compilation compilation) =>
+        Generate(root, [], compilation);
+
+    public static IEnumerable<GeneratedSource> Generate(
+        OidTreeNode root,
+        IEnumerable<MibModule> modules,
+        Compilation compilation)
     {
         var emitted = new HashSet<string>(StringComparer.Ordinal);
+
+        var textualConventions = modules
+            .SelectMany(module => module.TextualConventions.Values)
+            .Concat(Descendants(root).Select(node => node.Item).OfType<MibLeaf>().Select(leaf => leaf.Type))
+            .Where(ValueTypes.IsTextualConventionEnum)
+            .ToList();
+        var tcNames = new TextualConventionNames(textualConventions.Select(type => type.TextualConvention!));
+        var resolver = new ValueTypeResolver(root, compilation, tcNames);
+        foreach (var type in textualConventions)
+        {
+            var tc = type.TextualConvention!;
+            var @namespace = ValueTypes.TextualConventionNamespace(tc);
+            var name = tcNames.TypeName(tc);
+            var typeName = $"{@namespace}.{name}";
+            if (!emitted.Add(typeName) || compilation.GetTypeByMetadataName(typeName) is not null) continue;
+            yield return new GeneratedSource(
+                HintName(@namespace, name, "TextualConventions"),
+                string.Join("\n", TextualConventionEnum(@namespace, name, type, tc)));
+        }
 
         foreach (var node in Descendants(root).Where(node => !node.HasValueAncestor()))
         {
@@ -45,9 +70,22 @@ internal static class TreeTemplating
             };
             yield return new GeneratedSource(
                 HintName(parentNamespace, name, folder),
-                string.Join("\n", ValueType(parentNamespace, name, node)));
+                string.Join("\n", ValueType(parentNamespace, name, node, resolver)));
         }
     }
+
+    private static string[] TextualConventionEnum(string @namespace, string name, MibType type,
+        MibTextualConvention tc) =>
+    [
+        .. CommonUsings(),
+        "",
+        $"namespace {@namespace}",
+        "{",
+        .. ValueTypes.EnumDeclaration(name, type,
+            tc.Description,
+            $"Textual convention {tc.Name} defined in {tc.Module}.").Indent(),
+        "}"
+    ];
 
     private static string NodeName(OidTreeNode node)
     {
@@ -93,21 +131,23 @@ internal static class TreeTemplating
         "}"
     ];
 
-    private static string[] ValueType(string @namespace, string name, OidTreeNode node)
+    private static string[] ValueType(string @namespace, string name, OidTreeNode node, ValueTypeResolver resolver)
     {
         return node.Item switch
         {
-            MibLeaf leaf => LeafType(@namespace, name, node, leaf),
-            MibTable table => TableType(@namespace, name, node, table),
-            MibNotification notification => NotificationType(@namespace, name, node, notification),
+            MibLeaf leaf => LeafType(@namespace, name, node, leaf, resolver),
+            MibTable table => TableType(@namespace, name, node, table, resolver),
+            MibNotification notification => NotificationType(@namespace, name, node, notification, resolver),
             _ => throw new InvalidOperationException($"OID node '{name}' has no value type.")
         };
     }
 
-    private static string[] LeafType(string @namespace, string name, OidTreeNode node, MibLeaf leaf)
+    private static string[] LeafType(string @namespace, string name, OidTreeNode node, MibLeaf leaf,
+        ValueTypeResolver resolver)
     {
         var oid = DotForm(node);
         var hasTableAncestor = node.AncestorsAndSelf().Any(ancestor => ancestor.Item is MibTable);
+        var info = resolver.Resolve(node, leaf);
         List<string> lines =
         [
             .. CommonUsings(),
@@ -118,16 +158,11 @@ internal static class TreeTemplating
                 oid,
                 leaf.Description).Indent(),
             $"\t{Templating.Attribute}",
-            $"\tpublic class {name} : ISnmpLeaf<{leaf.Type.AsAsnType()}>",
+            $"\tpublic class {name} : ISnmpLeaf<{info.LeafTypeArgument}>",
             "\t{",
             .. BranchIdentifier(node, name, @namespace),
+            .. LeafValueMembers(leaf, info, name).Indent().Indent()
         ];
-
-        var defaultFactory = Templating.DefaultFactory(leaf);
-        if (defaultFactory is not null)
-        {
-            lines.Add($"\t\tpublic static {leaf.Type.AsAsnType()} CreateDefaultValue() => {defaultFactory};");
-        }
 
         if (!hasTableAncestor)
         {
@@ -135,11 +170,51 @@ internal static class TreeTemplating
             lines.Add("\t\tpublic static Oid InstanceOid => field ??= Oid + 0;");
         }
 
-        lines.Add(
-            $"\t\tpublic static {leaf.Type.AsAsnType()}? Parse(IReadOnlyDictionary<Oid, AsnType> values) => values.TryGetValue(InstanceOid, out var value) ? value  as {leaf.Type.AsAsnType()} : null;");
+        lines.Add($"\t\t{LeafParse(info, "InstanceOid")}");
         lines.Add("\t}");
         lines.Add("}");
         return [.. lines];
+    }
+
+    private static string LeafParse(ValueTypeInfo info, string oid) =>
+        info.IsConverted
+            ? $"public static {info.CsType}? Parse(IReadOnlyDictionary<Oid, AsnType> values) => values.TryGetValue({oid}, out var value) && value is {info.AsnType} asn ? {info.FromAsn("asn")} : null;"
+            : $"public static {info.AsnType}? Parse(IReadOnlyDictionary<Oid, AsnType> values) => values.TryGetValue({oid}, out var value) ? value  as {info.AsnType} : null;";
+
+    // Members shared by top-level and nested leaf classes: inline enum, DEFVAL factory, ASN conversion
+    // and range/size constants.
+    private static IEnumerable<string> LeafValueMembers(MibLeaf leaf, ValueTypeInfo info, string className,
+        bool ownsInlineEnum = true)
+    {
+        if (ownsInlineEnum && info.IsConverted && ValueTypes.IsInlineEnum(leaf.Type))
+        {
+            yield return "";
+            foreach (var line in ValueTypes.EnumDeclaration(
+                         ValueTypes.LeafEnumName(leaf.Type, className), leaf.Type,
+                         $"Named values of {leaf.Ident.Name}."))
+            {
+                yield return line;
+            }
+
+            yield return "";
+        }
+
+        var defaultFactory = ValueTypes.DefaultFactory(leaf, info);
+        if (defaultFactory is not null)
+        {
+            yield return $"public static {info.CsType} CreateDefaultValue() => {defaultFactory};";
+        }
+
+        if (info.IsConverted)
+        {
+            yield return $"/// <summary>Encodes a value as the <see cref=\"{info.AsnType}\"/> used on the wire.</summary>";
+            yield return $"public static {info.AsnType} ToAsn({info.CsType} value) => {info.ToAsn("value")};";
+        }
+
+        foreach (var line in ValueTypes.ConstraintMembers(leaf.Type))
+        {
+            yield return line;
+        }
     }
 
     private static string DotForm(OidTreeNode skip)
@@ -147,9 +222,17 @@ internal static class TreeTemplating
         return string.Join(".", skip.AncestorsAndSelf().Skip(1).Select(x => x.Arc));
     }
 
-    private static string[] TableType(string @namespace, string name, OidTreeNode node, MibTable table)
+    private static string[] TableType(string @namespace, string name, OidTreeNode node, MibTable table,
+        ValueTypeResolver resolver)
     {
         var oid = DotForm(node);
+        var entryLeaves = node.Children.TryGetValue(1, out var entryNode)
+            ? entryNode.Children.Values
+                .OrderBy(child => child.Arc)
+                .Where(child => child.Item is MibLeaf)
+                .Select(child => (Leaf: (MibLeaf)child.Item!, Info: resolver.Resolve(child, (MibLeaf)child.Item!)))
+                .ToArray()
+            : [];
         List<string> lines =
         [
             .. CommonUsings(),
@@ -171,7 +254,7 @@ internal static class TreeTemplating
             .. Populate().Indent().Indent(),
             "",
             "\t}",
-            .. Templating.TableEntry("public", table, @namespace).Indent()
+            .. Templating.TableEntry("public", table, @namespace, entryLeaves).Indent()
         ];
 
 
@@ -180,7 +263,7 @@ internal static class TreeTemplating
                      .OrderBy(child => child.Arc))
         {
             lines.Add("");
-            lines.AddRange(NestedNode(child, $"{name}.Oid").Indent());
+            lines.AddRange(NestedNode(child, $"{name}.Oid", resolver).Indent());
         }
 
         lines.Add("}");
@@ -290,11 +373,12 @@ internal static class TreeTemplating
         ];
     }
 
-    private static IEnumerable<string> NestedNode(OidTreeNode node, string parentOid)
+    private static IEnumerable<string> NestedNode(OidTreeNode node, string parentOid, ValueTypeResolver resolver)
     {
         var name = OidTreeNaming.TypeName(node);
         var expression = $"{parentOid} + {node.Arc}u";
-        var @interface = node.Item is MibLeaf l ? $"ISnmpLeaf<{l.Type.AsAsnType()}>" : "IBranchIdentifier";
+        var info = node.Item is MibLeaf l ? resolver.Resolve(node, l) : null;
+        var @interface = info is not null ? $"ISnmpLeaf<{info.LeafTypeArgument}>" : "IBranchIdentifier";
         if (node.Item is MibLeaf { Description: { } description } && !string.IsNullOrWhiteSpace(description))
         {
             foreach (var line in Templating.DocComment(description))
@@ -313,22 +397,20 @@ internal static class TreeTemplating
         yield return $"\tpublic static string BranchName => \"{name}\";";
         yield return $"\tpublic static string FullBranchName => \"{OidTreeNaming.NamespaceFor(node)}\";";
 
-        if (node.Item is MibLeaf leaf)
+        if (node.Item is MibLeaf leaf && info is not null)
         {
-            var defaultFactory = Templating.DefaultFactory(leaf);
-            if (defaultFactory is not null)
+            foreach (var line in LeafValueMembers(leaf, info, name, ownsInlineEnum: false))
             {
-                yield return $"\tpublic static {leaf.Type.AsAsnType()} CreateDefaultValue() => {defaultFactory};";
+                yield return $"\t{line}";
             }
 
-            yield return
-                $"\tpublic static {leaf.Type.AsAsnType()}? Parse(IReadOnlyDictionary<Oid, AsnType> values) => values.TryGetValue(Oid, out var value) ? value  as {leaf.Type.AsAsnType()} : null;";
+            yield return $"\t{LeafParse(info, "Oid")}";
         }
 
         foreach (var child in node.Children.Values.OrderBy(child => child.Arc))
         {
             yield return "";
-            foreach (var line in NestedNode(child, $"{name}.Oid"))
+            foreach (var line in NestedNode(child, $"{name}.Oid", resolver))
             {
                 yield return $"\t{line}";
             }
@@ -338,9 +420,10 @@ internal static class TreeTemplating
     }
 
     private static string[] NotificationType(string @namespace, string name, OidTreeNode node,
-        MibNotification notification)
+        MibNotification notification, ValueTypeResolver resolver)
     {
         var oid = DotForm(node);
+        var infos = notification.Objects.Select(resolver.Resolve).ToArray();
         var objects = notification.Objects
             .Select((obj, index) => (
                 Object: obj,
@@ -405,8 +488,8 @@ internal static class TreeTemplating
             $"\tpublic class {name} : ISnmpNotification<{name}>",
             "\t{",
             .. BranchIdentifier(node, name, @namespace),
-            .. objects.Select(obj =>
-                $"\t\tpublic required {obj.Object.Type.AsAsnType()} {obj.Name}; "),
+            .. objects.Select((obj, index) =>
+                $"\t\tpublic required {infos[index].CsType} {obj.Name}; "),
             .. objects.Select(obj =>
                 $"\t\tprivate static Oid {obj.Name}Id = {obj.Object.Ident.AsLiteral()}; "),
             "",
@@ -446,7 +529,7 @@ internal static class TreeTemplating
             .. tableIndexValidation,
             .. notificationIndexAssignment,
             $"\t\t\treturn new {name}(notificationIndexes){{",
-            .. objects.Select((obj, index) => $"\t\t\t\t{obj.Name} = value{index},"),
+            .. objects.Select((obj, index) => $"\t\t\t\t{obj.Name} = {infos[index].FromAsn($"value{index}")},"),
             "\t\t\t\tAdditionalBindings = additionalBindings,",
             "\t\t\t};",
             "\t\t}",
@@ -455,10 +538,10 @@ internal static class TreeTemplating
             "\t\t{",
             .. tables.Select(table =>
                 $"\t\t\tif (!{NotificationIndexValidatorName(table)}(NotificationIndexes)) throw new InvalidOperationException(\"NotificationIndexes does not encode a valid {table.EntryType()} index.\");"),
-            .. objects.Select(obj =>
+            .. objects.Select((obj, index) =>
                 obj.Table is null
-                    ? $"\t\t\tvalues.Add({obj.Name}Id + 0u, {obj.Name});"
-                    : $"\t\t\tvalues.Add(new Oid((uint[])[.. {obj.Name}Id.ToArray(), .. NotificationIndexes]), {obj.Name});"),
+                    ? $"\t\t\tvalues.Add({obj.Name}Id + 0u, {infos[index].ToAsn(obj.Name)});"
+                    : $"\t\t\tvalues.Add(new Oid((uint[])[.. {obj.Name}Id.ToArray(), .. NotificationIndexes]), {infos[index].ToAsn(obj.Name)});"),
             "\t\t\tvalues.Add(AdditionalBindings);",
             "\t\t}",
             "",

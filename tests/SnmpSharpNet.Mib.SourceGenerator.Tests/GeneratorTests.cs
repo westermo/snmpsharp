@@ -1,5 +1,6 @@
 using Snmp.Iso.Org.Dod.Internet.Private.Enterprises.WestermoOid.Common.WestermoInterface.WmoInterfaceObjects;
 using System.Reflection;
+using Snmp.Iso.Org.Dod.Internet.Mgmt.Mib2.Interfaces;
 using Snmp.Iso.Org.Dod.Internet.SnmpV2.SnmpModules.SNMPv2.SnmpMIBObjects.SnmpTraps;
 using Snmp.Iso.Std.Iso8802.Ieee802dot1.Ieee802dot1mibs.Lldp.Notifications.NotificationPrefix;
 using LocalSystemData = Snmp.Iso.Std.Iso8802.Ieee802dot1.Ieee802dot1mibs.Lldp.Objects.LocalSystemData;
@@ -59,7 +60,7 @@ public class SourceGeneratorIntegrationTests
         };
         var value = LocalSystemData.LocChassisIdSubtype.Parse(dict);
 
-        await Assert.That(value).IsEqualTo(new Integer32(4));
+        await Assert.That(value).IsEqualTo(global::Snmp.TextualConventions.Lldp.LldpChassisIdSubtype.MacAddress);
     }
 
     [Test]
@@ -76,9 +77,9 @@ public class SourceGeneratorIntegrationTests
     {
         var linkUp = new LinkUp([2])
         {
-            IfAdminStatus = new Integer32(1),
+            IfAdminStatus = IfTableEntry.AdminStatusValues.Up,
             IfIndex = new Integer32(2),
-            IfOperStatus = new Integer32(3)
+            IfOperStatus = IfTableEntry.OperStatusValues.Testing
         };
         var pdu = linkUp.ToTrapPdu();
         var parsed = global::Snmp.Iso.Id.ParseNotification(pdu);
@@ -146,9 +147,9 @@ public class SourceGeneratorIntegrationTests
     {
         var linkUp = new LinkUp([2])
         {
-            IfAdminStatus = new Integer32(1),
+            IfAdminStatus = IfTableEntry.AdminStatusValues.Up,
             IfIndex = new Integer32(2),
-            IfOperStatus = new Integer32(3)
+            IfOperStatus = IfTableEntry.OperStatusValues.Testing
         };
         var bindings = new VbCollection();
 
@@ -177,8 +178,8 @@ public class SourceGeneratorIntegrationTests
         await Assert.That(notification!.NotificationIndexes).IsEquivalentTo(new uint[] { 99 });
         await Assert.That(notification.Index).IsEqualTo(99u);
         await Assert.That(notification.IfIndex).IsEqualTo(new Integer32(99));
-        await Assert.That(notification.IfAdminStatus).IsEqualTo(new Integer32(1));
-        await Assert.That(notification.IfOperStatus).IsEqualTo(new Integer32(1));
+        await Assert.That(notification.IfAdminStatus).IsEqualTo(IfTableEntry.AdminStatusValues.Up);
+        await Assert.That(notification.IfOperStatus).IsEqualTo(IfTableEntry.OperStatusValues.Up);
     }
 
     [Test]
