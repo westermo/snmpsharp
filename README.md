@@ -70,6 +70,50 @@ linkUp.Populate(bindings); // Adds MIB OBJECTS in declaration order.
 LinkUp? parsed = LinkUp.Parse(bindings);
 ```
 
+## Runtime MIB modules
+
+When the consuming project also references `SnmpSharpNet.Mib`, the generator emits an internal `Snmp.GeneratedMibModules` class. It embeds the source text of every compiled MIB, so the module ASTs are available at runtime. You can use them for tree viewers or to combine compiled MIBs with MIBs loaded at runtime. Without the `SnmpSharpNet.Mib` reference, nothing extra is generated.
+
+```csharp
+using SnmpSharpNet.Mib;
+
+// Module identifiers, embedded sources and lazily parsed ASTs.
+IReadOnlyList<string> names = global::Snmp.GeneratedMibModules.ModuleNames;
+IReadOnlyDictionary<string, string> sources = global::Snmp.GeneratedMibModules.Sources;
+var asts = global::Snmp.GeneratedMibModules.Asts;
+
+// Combine with MIBs imported at runtime (runtime modules replace compiled modules with the same name).
+var runtime = new[] { MibParser.ParseAstFile("mibs/MY-RUNTIME-MIB.mib") };
+IReadOnlyDictionary<string, MibModule> modules = global::Snmp.GeneratedMibModules.Resolve(runtime);
+
+// Build a merged OID tree, e.g. for a tree viewer.
+MibTreeNode root = global::Snmp.GeneratedMibModules.BuildTree(runtime);
+foreach (var node in root.Descendants())
+{
+    Console.WriteLine($"{node.DottedOid} {node.Name} ({node.ModuleName})");
+}
+```
+
+The tree can also be built directly from any resolved modules with `MibTree.Build(...)`. `MibParser.ParseModules(...)` resolves a set of ASTs.
+
+Inside `SnmpSharpNet.*` namespaces, `Snmp` binds to the `SnmpSharpNet.Snmp` class, so refer to the generated class as `global::Snmp.GeneratedMibModules`.
+
+Embedding the MIB sources increases the assembly size. To opt out, set:
+
+```xml
+<PropertyGroup>
+  <SnmpSharpNetEmbedMibSources>false</SnmpSharpNetEmbedMibSources>
+</PropertyGroup>
+```
+
+The NuGet package makes this property visible to the generator. When you reference the generator as a `ProjectReference`, also add:
+
+```xml
+<ItemGroup>
+  <CompilerVisibleProperty Include="SnmpSharpNetEmbedMibSources"/>
+</ItemGroup>
+```
+
 ## Interoperability tests
 
 The source-generator integration tests receive an SNMPv2 `linkUp` trap emitted by
