@@ -1,0 +1,8 @@
+<Project>
+    <!-- Makes the opt-out property visible to the SnmpSharpNet MIB source generator.
+         Set <SnmpSharpNetEmbedMibSources>false</SnmpSharpNetEmbedMibSources> to stop embedding MIB sources
+         (and the runtime Snmp.GeneratedMibModules registry) into the compiled assembly. -->
+    <ItemGroup>
+        <CompilerVisibleProperty Include="SnmpSharpNetEmbedMibSources"/>
+    </ItemGroup>
+</Project>
