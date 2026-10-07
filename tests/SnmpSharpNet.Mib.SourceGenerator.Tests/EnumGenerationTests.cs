@@ -3,6 +3,8 @@ using Snmp.Iso.EnumTest.Notifications;
 using Snmp.Iso.EnumTest.Scalars;
 using Color = Snmp.TextualConventions.EnumTest.EnumTestColor;
 using Features = Snmp.TextualConventions.EnumTest.EnumTestFeatures;
+using ShadeA = Snmp.TextualConventions.EnumTest.EnumTestShade;
+using ShadeB = Snmp.TextualConventions.EnumTest.EnumTestShade_2;
 using ColorLeaf = Snmp.Iso.EnumTest.Scalars.Color;
 using FeaturesLeaf = Snmp.Iso.EnumTest.Scalars.Features;
 using RangeLeaf = Snmp.Iso.EnumTest.Scalars.Range;
@@ -58,6 +60,17 @@ public class EnumGenerationTests
                 Single(ColorLeaf.InstanceOid, new Integer32(1))))
             .IsEqualTo(Color.Red);
         await Assert.That(RowEntry.RowColor.ToAsn(Color.BlueGreen)).IsEqualTo(new Integer32(3));
+    }
+
+    [Test]
+    public async Task TextualConventionEnum_DisambiguatesCollidingNames()
+    {
+        await Assert.That((int)ShadeA.Dark).IsEqualTo(2);
+        await Assert.That((int)ShadeB.Bright).IsEqualTo(6);
+        await Assert.That(ShadeHyphen.Parse(Single(ShadeHyphen.InstanceOid, new Integer32(1))))
+            .IsEqualTo(ShadeA.Light);
+        await Assert.That(ShadePlain.Parse(Single(ShadePlain.InstanceOid, new Integer32(5))))
+            .IsEqualTo(ShadeB.Dim);
     }
 
     [Test]

@@ -25,6 +25,16 @@ EnumTestPercent ::= TEXTUAL-CONVENTION
     DESCRIPTION "A percentage."
     SYNTAX      Integer32 (0..100)
 
+EnumTest-Shade ::= TEXTUAL-CONVENTION
+    STATUS      current
+    DESCRIPTION "A shade whose name collides with EnumTestShade after normalization."
+    SYNTAX      INTEGER { light(1), dark(2) }
+
+EnumTestShade ::= TEXTUAL-CONVENTION
+    STATUS      current
+    DESCRIPTION "A shade whose name collides with EnumTest-Shade after normalization."
+    SYNTAX      INTEGER { dim(5), bright(6) }
+
 enumTestMode OBJECT-TYPE
     SYNTAX      INTEGER { off(0), on(1), auto-detect(2), reserved(-2) }
     MAX-ACCESS  read-write
@@ -104,6 +114,20 @@ enumTestValues OBJECT-TYPE
     STATUS      current
     DESCRIPTION "Leaf whose class name clashes with the nested enum name."
     ::= { enumTestScalars 11 }
+
+enumTestShadeHyphen OBJECT-TYPE
+    SYNTAX      EnumTest-Shade
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "Leaf using EnumTest-Shade."
+    ::= { enumTestScalars 12 }
+
+enumTestShadePlain OBJECT-TYPE
+    SYNTAX      EnumTestShade
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "Leaf using EnumTestShade."
+    ::= { enumTestScalars 13 }
 
 enumTestRowTable OBJECT-TYPE
     SYNTAX      SEQUENCE OF EnumTestRowEntry

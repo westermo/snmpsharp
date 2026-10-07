@@ -23,17 +23,19 @@ internal static class TreeTemplating
         Compilation compilation)
     {
         var emitted = new HashSet<string>(StringComparer.Ordinal);
-        var resolver = new ValueTypeResolver(root, compilation);
 
         var textualConventions = modules
             .SelectMany(module => module.TextualConventions.Values)
             .Concat(Descendants(root).Select(node => node.Item).OfType<MibLeaf>().Select(leaf => leaf.Type))
-            .Where(ValueTypes.IsTextualConventionEnum);
+            .Where(ValueTypes.IsTextualConventionEnum)
+            .ToList();
+        var tcNames = new TextualConventionNames(textualConventions.Select(type => type.TextualConvention!));
+        var resolver = new ValueTypeResolver(root, compilation, tcNames);
         foreach (var type in textualConventions)
         {
             var tc = type.TextualConvention!;
             var @namespace = ValueTypes.TextualConventionNamespace(tc);
-            var name = ValueTypes.TextualConventionTypeName(tc);
+            var name = tcNames.TypeName(tc);
             var typeName = $"{@namespace}.{name}";
             if (!emitted.Add(typeName) || compilation.GetTypeByMetadataName(typeName) is not null) continue;
             yield return new GeneratedSource(

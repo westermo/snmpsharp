@@ -81,9 +81,6 @@ internal static class ValueTypes
     public static string TextualConventionNamespace(MibTextualConvention tc) =>
         $"{TextualConventionsNamespace}.{OidTreeNaming.ModuleName(tc.Module!)}";
 
-    public static string TextualConventionTypeName(MibTextualConvention tc) =>
-        OidTreeNaming.FormatIdentifier(tc.Name);
-
     public static int BitsOctets(MibType type) =>
         type.Values is { Count: > 0 } values ? (int)(values.Values.Max() / 8) + 1 : 0;
 
@@ -241,8 +238,45 @@ internal static class ValueTypes
     private static string Format(long value) => value.ToString(CultureInfo.InvariantCulture);
 }
 
+/// <summary>
+/// Assigns unique C# type names to textual convention enums. Distinct conventions whose names normalize to the
+/// same identifier (e.g. <c>Foo-Bar</c> and <c>FooBar</c>) get deterministic <c>_2</c>, <c>_3</c>... suffixes.
+/// </summary>
+internal sealed class TextualConventionNames
+{
+    private readonly Dictionary<(string Module, string Name), string> names = new();
+
+    public TextualConventionNames(IEnumerable<MibTextualConvention> conventions)
+    {
+        var keys = conventions
+            .Where(tc => tc.Module is not null)
+            .Select(tc => (Module: tc.Module!, tc.Name))
+            .Distinct()
+            .OrderBy(key => key.Module, StringComparer.Ordinal)
+            .ThenBy(key => key.Name, StringComparer.Ordinal);
+        var used = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var key in keys)
+        {
+            var @namespace = $"{ValueTypes.TextualConventionsNamespace}.{OidTreeNaming.ModuleName(key.Module)}";
+            var baseName = OidTreeNaming.FormatIdentifier(key.Name);
+            var name = baseName;
+            for (var i = 2; !used.Add($"{@namespace}.{name}"); i++)
+            {
+                name = $"{baseName.TrimStart('@')}_{i}";
+            }
+
+            names[key] = name;
+        }
+    }
+
+    public string TypeName(MibTextualConvention tc) =>
+        tc.Module is not null && names.TryGetValue((tc.Module, tc.Name), out var name)
+            ? name
+            : OidTreeNaming.FormatIdentifier(tc.Name);
+}
+
 /// <summary>Maps MIB objects onto the generated C# types that expose their values.</summary>
-internal sealed class ValueTypeResolver(OidTreeNode root, Compilation compilation)
+internal sealed class ValueTypeResolver(OidTreeNode root, Compilation compilation, TextualConventionNames tcNames)
 {
     public ValueTypeInfo Resolve(MibLeaf leaf)
     {
@@ -257,7 +291,7 @@ internal sealed class ValueTypeResolver(OidTreeNode root, Compilation compilatio
         if (kind == ValueKind.Asn) return ValueTypeInfo.ForAsn(type);
 
         var csType = type.TextualConvention is { Module: not null } tc
-            ? $"global::{ValueTypes.TextualConventionNamespace(tc)}.{ValueTypes.TextualConventionTypeName(tc)}"
+            ? $"global::{ValueTypes.TextualConventionNamespace(tc)}.{tcNames.TypeName(tc)}"
             : InlineEnumType(node, leaf);
         return csType is null
             ? ValueTypeInfo.ForAsn(type)
