@@ -361,7 +361,7 @@ internal static class TreeTemplating
             .ToArray();
         var typedIndexProperties = tables.SelectMany(indexTable => NotificationIndexProperties(
             indexTable,
-            [.. objects.Select(obj => obj.Name), "NotificationIndexes"]));
+            [.. objects.Select(obj => obj.Name), .. ReservedNotificationMemberNames]));
         var notificationIndexAssignment = tableGroups.Length switch
         {
             0 => Enumerable.Empty<string>(),
@@ -411,6 +411,13 @@ internal static class TreeTemplating
                 $"\t\tprivate static Oid {obj.Name}Id = {obj.Object.Ident.AsLiteral()}; "),
             "",
             "\t\tpublic uint[] NotificationIndexes { get; }",
+            "",
+            "\t\t/// <summary>",
+            "\t\t/// Variable bindings present in the notification that are not declared by the MIB OBJECTS clause,",
+            "\t\t/// in their original order. They are appended after the declared objects by <see cref=\"Populate\"/>.",
+            "\t\t/// </summary>",
+            "\t\tpublic VbCollection AdditionalBindings { get; init; } = new();",
+            "",
             "\t\tpublic Oid InstanceOid => new Oid((uint[])[.. Oid.ToArray(), .. NotificationIndexes]);",
             "",
             $"\t\tpublic {name}() : this([]) {{ }}",
@@ -429,8 +436,10 @@ internal static class TreeTemplating
             "\t\t\tvar trapIndexes = pdu.TrapObjectID[Oid.Length..];",
             "\t\t\tvar values = pdu.VbList;",
             $"\t\t\tif (values.Count < {objects.Length}) return null;",
-            .. objects.Select((obj, index) =>
-                $"\t\t\tif (values[{index}].Oid is not {{ }} oid{index} || !{NotificationObjectOidMatch(obj, $"oid{index}")} || values[{index}].Value is not {obj.Object.Type.AsAsnType()} value{index}) return null;"),
+            "\t\t\tvar additionalBindings = new VbCollection();",
+            "\t\t\tvar cursor = 0;",
+            .. objects.SelectMany((obj, index) => NotificationObjectScan(obj, index)),
+            "\t\t\tfor (; cursor < values.Count; cursor++) additionalBindings.Add(values[cursor]);",
             "\t\t\tvar notificationIndexes = trapIndexes;",
             .. tableObjects.Select(obj =>
                 $"\t\t\tvar indexes{obj.Index} = oid{obj.Index}[{obj.Object.Name}Id.Length..];"),
@@ -438,6 +447,7 @@ internal static class TreeTemplating
             .. notificationIndexAssignment,
             $"\t\t\treturn new {name}(notificationIndexes){{",
             .. objects.Select((obj, index) => $"\t\t\t\t{obj.Name} = value{index},"),
+            "\t\t\t\tAdditionalBindings = additionalBindings,",
             "\t\t\t};",
             "\t\t}",
             "",
@@ -449,6 +459,7 @@ internal static class TreeTemplating
                 obj.Table is null
                     ? $"\t\t\tvalues.Add({obj.Name}Id + 0u, {obj.Name});"
                     : $"\t\t\tvalues.Add(new Oid((uint[])[.. {obj.Name}Id.ToArray(), .. NotificationIndexes]), {obj.Name});"),
+            "\t\t\tvalues.Add(AdditionalBindings);",
             "\t\t}",
             "",
             "\t}",
@@ -485,12 +496,43 @@ internal static class TreeTemplating
         (MibLeaf Object, string Name, MibTable? Table) obj,
         string oidName)
     {
+        var id = $"{obj.Name}Id";
         if (obj.Table is null)
         {
-            return $"{oidName}.Equals({obj.Name}Id + 0u)";
+            // Scalars are accepted both with the SMIv2 ".0" instance suffix and without it,
+            // since some agents (e.g. for lldpRemTablesChange) omit the instance identifier.
+            return
+                $"({id}.IsRootOf({oidName}) && ({oidName}.Length == {id}.Length || ({oidName}.Length == {id}.Length + 1 && {oidName}[{id}.Length] == 0u)))";
         }
 
-        return $"({obj.Name}Id.IsRootOf({oidName}) && {oidName}.Length > {obj.Name}Id.Length)";
+        return $"({id}.IsRootOf({oidName}) && {oidName}.Length > {id}.Length)";
+    }
+
+    private static readonly string[] ReservedNotificationMemberNames = ["NotificationIndexes", "AdditionalBindings"];
+
+    // Scans forward from the cursor for the next binding matching the declared object; any bindings
+    // skipped along the way are not declared by the MIB and are kept as additional bindings.
+    private static IEnumerable<string> NotificationObjectScan(
+        (MibLeaf Object, string Name, MibTable? Table) obj,
+        int index)
+    {
+        var type = obj.Object.Type.AsAsnType();
+        yield return $"\t\t\tOid? oid{index} = null;";
+        yield return $"\t\t\t{type}? value{index} = null;";
+        yield return "\t\t\tfor (; cursor < values.Count; cursor++)";
+        yield return "\t\t\t{";
+        yield return "\t\t\t\tvar vb = values[cursor];";
+        yield return
+            $"\t\t\t\tif (vb.Oid is {{ }} candidate{index} && {NotificationObjectOidMatch(obj, $"candidate{index}")} && vb.Value is {type} typed{index})";
+        yield return "\t\t\t\t{";
+        yield return $"\t\t\t\t\toid{index} = candidate{index};";
+        yield return $"\t\t\t\t\tvalue{index} = typed{index};";
+        yield return "\t\t\t\t\tcursor++;";
+        yield return "\t\t\t\t\tbreak;";
+        yield return "\t\t\t\t}";
+        yield return "\t\t\t\tadditionalBindings.Add(vb);";
+        yield return "\t\t\t}";
+        yield return $"\t\t\tif (oid{index} is null || value{index} is null) return null;";
     }
 
     private static string NotificationIndexValidatorName(MibTable table) =>
@@ -544,7 +586,7 @@ internal static class TreeTemplating
             .Take(index + 1)
             .Count(previous => previous.Ident.Equals(obj.Ident));
         var name = occurrence == 1 ? baseName : $"{baseName}{occurrence}";
-        return name.Equals("NotificationIndexes", StringComparison.Ordinal) ? $"Value{name}" : name;
+        return ReservedNotificationMemberNames.Contains(name, StringComparer.Ordinal) ? $"Value{name}" : name;
     }
 
     private static string OidExpression(OidTreeNode node)

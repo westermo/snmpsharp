@@ -1,6 +1,7 @@
 using Snmp.Iso.Org.Dod.Internet.Private.Enterprises.WestermoOid.Common.WestermoInterface.WmoInterfaceObjects;
 using System.Reflection;
 using Snmp.Iso.Org.Dod.Internet.SnmpV2.SnmpModules.SNMPv2.SnmpMIBObjects.SnmpTraps;
+using Snmp.Iso.Std.Iso8802.Ieee802dot1.Ieee802dot1mibs.Lldp.Notifications.NotificationPrefix;
 using LocalSystemData = Snmp.Iso.Std.Iso8802.Ieee802dot1.Ieee802dot1mibs.Lldp.Objects.LocalSystemData;
 
 namespace SnmpSharpNet.Mib.SourceGenerator.IntegrationTests;
@@ -227,6 +228,114 @@ public class SourceGeneratorIntegrationTests
         };
 
         await Assert.That(LinkUp.Parse(TrapPdu(LinkUp.Oid, [.. bindings]))).IsNull();
+    }
+
+    private static readonly Oid RemTablesInserts = new("1.0.8802.1.1.2.1.2.2");
+    private static readonly Oid RemTablesDeletes = new("1.0.8802.1.1.2.1.2.3");
+    private static readonly Oid RemTablesDrops = new("1.0.8802.1.1.2.1.2.4");
+    private static readonly Oid RemTablesAgeouts = new("1.0.8802.1.1.2.1.2.5");
+
+    [Test]
+    public async Task GeneratedNotification_ParsesScalarObjectsWithoutInstanceSuffix()
+    {
+        var pdu = TrapPdu(
+            RemTablesChange.Oid,
+            new Vb(RemTablesInserts, new Gauge32(1)),
+            new Vb(RemTablesDeletes, new Gauge32(2)),
+            new Vb(RemTablesDrops, new Gauge32(3)),
+            new Vb(RemTablesAgeouts, new Gauge32(4)));
+
+        var notification = global::Snmp.Iso.Id.ParseNotification(pdu) as RemTablesChange;
+
+        await Assert.That(notification).IsNotNull();
+        await Assert.That(notification!.LldpStatsRemTablesInserts).IsEqualTo(new Gauge32(1));
+        await Assert.That(notification.LldpStatsRemTablesDeletes).IsEqualTo(new Gauge32(2));
+        await Assert.That(notification.LldpStatsRemTablesDrops).IsEqualTo(new Gauge32(3));
+        await Assert.That(notification.LldpStatsRemTablesAgeouts).IsEqualTo(new Gauge32(4));
+        await Assert.That(notification.AdditionalBindings.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task GeneratedNotification_ParsesScalarObjectsWithInstanceSuffix()
+    {
+        var pdu = TrapPdu(
+            RemTablesChange.Oid,
+            new Vb(RemTablesInserts + 0u, new Gauge32(1)),
+            new Vb(RemTablesDeletes + 0u, new Gauge32(2)),
+            new Vb(RemTablesDrops + 0u, new Gauge32(3)),
+            new Vb(RemTablesAgeouts + 0u, new Gauge32(4)));
+
+        var notification = RemTablesChange.Parse(pdu);
+
+        await Assert.That(notification).IsNotNull();
+        await Assert.That(notification!.LldpStatsRemTablesAgeouts).IsEqualTo(new Gauge32(4));
+    }
+
+    [Test]
+    public async Task GeneratedNotification_RejectsScalarObjectsWithNonZeroInstanceSuffix()
+    {
+        var pdu = TrapPdu(
+            RemTablesChange.Oid,
+            new Vb(RemTablesInserts + 1u, new Gauge32(1)),
+            new Vb(RemTablesDeletes + 0u, new Gauge32(2)),
+            new Vb(RemTablesDrops + 0u, new Gauge32(3)),
+            new Vb(RemTablesAgeouts + 0u, new Gauge32(4)));
+
+        await Assert.That(RemTablesChange.Parse(pdu)).IsNull();
+    }
+
+    [Test]
+    public async Task GeneratedNotification_ToleratesAndRetainsAdditionalBindings()
+    {
+        var sysUpTime = new Vb(SnmpConstants.SysUpTime, new TimeTicks(42));
+        var sysDescr = new Vb(new Oid("1.3.6.1.2.1.1.1.0"), new OctetString("switch"));
+        var trailing = new Vb(new Oid("1.3.6.1.2.1.1.5.0"), new OctetString("name"));
+        var pdu = TrapPdu(
+            RemTablesChange.Oid,
+            sysUpTime,
+            new Vb(RemTablesInserts, new Gauge32(1)),
+            new Vb(RemTablesDeletes, new Gauge32(2)),
+            sysDescr,
+            new Vb(RemTablesDrops, new Gauge32(3)),
+            new Vb(RemTablesAgeouts, new Gauge32(4)),
+            trailing);
+
+        var notification = global::Snmp.Iso.Id.ParseNotification(pdu) as RemTablesChange;
+
+        await Assert.That(notification).IsNotNull();
+        await Assert.That(notification!.LldpStatsRemTablesDrops).IsEqualTo(new Gauge32(3));
+        await Assert.That(notification.AdditionalBindings.Count).IsEqualTo(3);
+        await Assert.That(notification.AdditionalBindings[0].Oid).IsEquivalentTo(sysUpTime.Oid!);
+        await Assert.That(notification.AdditionalBindings[1].Oid).IsEquivalentTo(sysDescr.Oid!);
+        await Assert.That(notification.AdditionalBindings[2].Oid).IsEquivalentTo(trailing.Oid!);
+
+        var bindings = new VbCollection();
+        notification.Populate(bindings);
+
+        await Assert.That(bindings.Count).IsEqualTo(7);
+        await Assert.That(bindings[0].Oid).IsEquivalentTo(RemTablesInserts + 0u);
+        await Assert.That(bindings[3].Oid).IsEquivalentTo(RemTablesAgeouts + 0u);
+        await Assert.That(bindings[4].Oid).IsEquivalentTo(sysUpTime.Oid!);
+        await Assert.That(bindings[5].Oid).IsEquivalentTo(sysDescr.Oid!);
+        await Assert.That(bindings[6].Oid).IsEquivalentTo(trailing.Oid!);
+    }
+
+    [Test]
+    public async Task GeneratedNotification_ToleratesAdditionalBindingsAroundTableColumns()
+    {
+        var bindings = new VbCollection
+        {
+            new Vb(new Oid("1.3.6.1.2.1.1.1.0"), new OctetString("switch")),
+            new Vb(new Oid("1.3.6.1.2.1.2.2.1.1.99"), new Integer32(99)),
+            new Vb(new Oid("1.3.6.1.2.1.2.2.1.7.99"), new Integer32(1)),
+            new Vb(new Oid("1.3.6.1.2.1.2.2.1.8.99"), new Integer32(1))
+        };
+
+        var notification = LinkUp.Parse(TrapPdu(LinkUp.Oid, [.. bindings]));
+
+        await Assert.That(notification).IsNotNull();
+        await Assert.That(notification!.NotificationIndexes).IsEquivalentTo(new uint[] { 99 });
+        await Assert.That(notification.AdditionalBindings.Count).IsEqualTo(1);
     }
 
     [Test]
