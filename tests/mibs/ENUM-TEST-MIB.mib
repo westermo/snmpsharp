@@ -129,6 +129,13 @@ enumTestShadePlain OBJECT-TYPE
     DESCRIPTION "Leaf using EnumTestShade."
     ::= { enumTestScalars 13 }
 
+enumTestNoneBits OBJECT-TYPE
+    SYNTAX      BITS { none(3), other(4) }
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "BITS with a named bit that collides with the synthetic None member."
+    ::= { enumTestScalars 14 }
+
 enumTestRowTable OBJECT-TYPE
     SYNTAX      SEQUENCE OF EnumTestRowEntry
     MAX-ACCESS  not-accessible

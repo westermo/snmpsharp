@@ -41,6 +41,14 @@ public class EnumGenerationTests
     }
 
     [Test]
+    public async Task InlineBits_SuffixesLabelNamedNone()
+    {
+        await Assert.That((ulong)NoneBits.Bits.None).IsEqualTo(0UL);
+        await Assert.That((ulong)NoneBits.Bits.None_3).IsEqualTo(1UL << 3);
+        await Assert.That((ulong)NoneBits.Bits.Other).IsEqualTo(1UL << 4);
+    }
+
+    [Test]
     public async Task EnumLeaf_ParsesAndEncodesValues()
     {
         await Assert.That(Mode.Parse(Single(Mode.InstanceOid, new Integer32(2)))).IsEqualTo(Mode.Values.AutoDetect);

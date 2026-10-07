@@ -98,6 +98,8 @@ internal static class ValueTypes
     public static IReadOnlyList<EnumMember> Members(MibType type, string typeName)
     {
         var used = new HashSet<string>(StringComparer.Ordinal) { typeName };
+        // BITS enums always get a synthetic None = 0, so a MIB label formatting to None is suffixed.
+        if (KindOf(type) == ValueKind.Flags) used.Add("None");
         var members = new List<EnumMember>();
         foreach (var pair in (type.Values ?? new Dictionary<string, long>()).OrderBy(pair => pair.Value))
         {
@@ -149,7 +151,7 @@ internal static class ValueTypes
         if (flags) yield return "[global::System.Flags]";
         yield return $"public enum {name} : {(flags ? "ulong" : "int")}";
         yield return "{";
-        if (flags && members.All(member => member.Name != "None"))
+        if (flags)
         {
             yield return "\t/// <summary>No bits set.</summary>";
             yield return "\tNone = 0,";
