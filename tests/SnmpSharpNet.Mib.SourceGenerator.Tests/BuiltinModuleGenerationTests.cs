@@ -90,6 +90,25 @@ public class BuiltinModuleGenerationTests
     }
 
     [Test]
+    public async Task ImportedBuiltinModule_IncludesBuiltinDependenciesTransitively()
+    {
+        var (diagnostics, sources) = Run(("TEST-MIB.mib", """
+                                                         TEST-MIB DEFINITIONS ::= BEGIN
+                                                         IMPORTS
+                                                             snmpMIB FROM SNMPv2-MIB;
+
+                                                         myNode OBJECT IDENTIFIER ::= { snmpMIB 99 }
+                                                         END
+                                                         """));
+
+        await Assert.That(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error)).IsEmpty();
+        await Assert.That(HasIdClass(sources, "Snmp.Iso.Org.Dod.Internet.SnmpV2.SnmpModules.SnmpMIB")).IsTrue();
+        await Assert.That(HasIdClass(sources, "Snmp.Iso.Org.Dod.Internet.SnmpV2.SnmpModules.SnmpMIB.MyNode"))
+            .IsTrue();
+        await Assert.That(sources.Any(s => s.Contains(".SnmpV2.Arc3", StringComparison.Ordinal))).IsFalse();
+    }
+
+    [Test]
     public async Task SuppliedCoreModules_AreParsedAndEmitted()
     {
         var (diagnostics, sources) = Run(

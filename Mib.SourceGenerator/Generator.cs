@@ -64,11 +64,29 @@ public sealed class SnmpGenerator : IIncrementalGenerator
                     return (null, [.. warnings, .. errors], null);
                 }
 
-                // Builtin modules that are imported but not supplied as files are emitted from BuiltinMib
-                var builtins = asts.Values
-                    .SelectMany(x => x.Module.Value.Dependencies)
-                    .Where(dep => BuiltinMib.All.ContainsKey(dep) && !asts.ContainsKey(dep))
-                    .Distinct()
+                // Builtin modules that are imported but not supplied as files are emitted from BuiltinMib.
+                // Their own dependencies are included transitively so their parent arcs are always named.
+                var builtinSet = new HashSet<string>(StringComparer.Ordinal);
+                var pending = new Queue<string>(asts.Values.SelectMany(x => x.Module.Value.Dependencies));
+                while (pending.Count > 0)
+                {
+                    var dep = pending.Dequeue();
+                    if (asts.ContainsKey(dep) || !BuiltinMib.All.TryGetValue(dep, out var exports)
+                                              || !builtinSet.Add(dep))
+                    {
+                        continue;
+                    }
+
+                    if (exports is BuiltinMib builtin)
+                    {
+                        foreach (var transitive in builtin.Dependencies)
+                        {
+                            pending.Enqueue(transitive);
+                        }
+                    }
+                }
+
+                var builtins = builtinSet
                     .OrderBy(dep => dep, StringComparer.Ordinal)
                     .ToArray();
 
