@@ -69,6 +69,9 @@ public class BuiltinMib : IMibThatExports
         return false;
     }
 
+    private static MibTextualConvention SNMPv2TCConvention(string name, string description) =>
+        new(name, null, Ast.SMIv2Status.Current, description, "RFC 2579", "SNMPv2-TC");
+
     // RFC 2578 - SNMPv2-SMI
     public static readonly BuiltinMib SNMPv2SMI = new(
         "SNMPv2-SMI",
@@ -147,7 +150,9 @@ public class BuiltinMib : IMibThatExports
             ["MacAddress"] = MibType.OctetString.WithSize(6),
             ["TruthValue"] = MibType.Integer32Enum
                 .WithNamedValue("true", 1)
-                .WithNamedValue("false", 2),
+                .WithNamedValue("false", 2)
+                .WithTextualConvention(SNMPv2TCConvention("TruthValue",
+                    "Represents a boolean value.")),
             ["TestAndIncr"] = MibType.Integer32.WithRange(0, 2147483647),
             ["AutonomousType"] = MibType.ObjectIdentifier,
             ["VariablePointer"] = MibType.ObjectIdentifier,
@@ -158,7 +163,9 @@ public class BuiltinMib : IMibThatExports
                 .WithNamedValue("notReady", 3)
                 .WithNamedValue("createAndGo", 4)
                 .WithNamedValue("createAndWait", 5)
-                .WithNamedValue("destroy", 6),
+                .WithNamedValue("destroy", 6)
+                .WithTextualConvention(SNMPv2TCConvention("RowStatus",
+                    "The RowStatus textual convention is used to manage the creation and deletion of conceptual rows.")),
             ["TimeStamp"] = MibType.TimeTicks,
             ["TimeInterval"] = MibType.Integer32.WithRange(0, 2147483647),
             ["DateAndTime"] = MibType.OctetString.WithSize(8).WithSize(11),
@@ -167,7 +174,9 @@ public class BuiltinMib : IMibThatExports
                 .WithNamedValue("volatile", 2)
                 .WithNamedValue("nonVolatile", 3)
                 .WithNamedValue("permanent", 4)
-                .WithNamedValue("readOnly", 5),
+                .WithNamedValue("readOnly", 5)
+                .WithTextualConvention(SNMPv2TCConvention("StorageType",
+                    "Describes the memory realization of a conceptual row.")),
             ["TDomain"] = MibType.ObjectIdentifier,
             ["TAddress"] = MibType.OctetString.WithSize(1, 255),
         },

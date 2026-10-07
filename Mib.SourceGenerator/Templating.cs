@@ -75,11 +75,13 @@ public static class Templating
     private static string UintArrayLiteral(IEnumerable<uint> values) =>
         $"new uint[] {{ {string.Join(", ", values.Select(value => $"{value}u"))} }}";
 
-    public static string[] TableEntry(string accessibility, MibTable table, string ns)
+    internal static string[] TableEntry(string accessibility, MibTable table, string ns,
+        IReadOnlyList<(MibLeaf Leaf, ValueTypeInfo Info)> entryLeaves)
     {
         var typeName = table.EntryType();
         var strip = table.CommonPrefix();
         var oid = string.Join(".", table.Ident.Oid.Append(1u));
+        var infos = ColumnInfos(table, entryLeaves);
         return
         [
             "",
@@ -90,6 +92,16 @@ public static class Templating
             $"\tpublic static Oid Oid => field ??= {table.Ident.AsLiteral()};",
             $"\tpublic static string BranchName => \"{typeName}\";",
             $"\tpublic static string FullBranchName => \"{ns}\";",
+            .. entryLeaves
+                .Where(entry => entry.Info.IsConverted && ValueTypes.IsInlineEnum(entry.Leaf.Type))
+                .SelectMany(entry => (string[])
+                [
+                    "",
+                    .. ValueTypes.EnumDeclaration(
+                        ValueTypes.ColumnEnumName(entry.Leaf.Type, entry.Leaf.Ident.CSharpName(strip)),
+                        entry.Leaf.Type,
+                        $"Named values of {entry.Leaf.Ident.Name}.")
+                ]).Indent(),
             .. table.Index.SelectMany((idx, i) => (string[])
             [
                 "",
@@ -101,17 +113,27 @@ public static class Templating
             [
                 "",
                 .. DocComment($"Column #{i + 1}", col.Description),
-                $"public {col.Type.AsAsnType()}? {col.Ident.CSharpName(strip)};",
+                $"public {infos[i].CsType}? {col.Ident.CSharpName(strip)};",
+                .. ValueTypes.ConstraintMembers(col.Type, col.Ident.CSharpName(strip)),
             ]).Indent(),
             "",
-            .. IndexedParse(table).Indent(),
+            .. IndexedParse(table, infos).Indent(),
             "",
-            .. Populate(table).Indent(),
+            .. Populate(table, infos).Indent(),
             "}"
         ];
     }
 
-    public static string[] IndexedParse(MibTable table)
+    private static ValueTypeInfo[] ColumnInfos(MibTable table,
+        IReadOnlyList<(MibLeaf Leaf, ValueTypeInfo Info)> entryLeaves) =>
+        table.Columns
+            .Select(col => entryLeaves
+                .Where(entry => entry.Leaf.Ident.Equals(col.Ident))
+                .Select(entry => entry.Info)
+                .FirstOrDefault() ?? ValueTypeInfo.ForAsn(col.Type))
+            .ToArray();
+
+    internal static string[] IndexedParse(MibTable table, IReadOnlyList<ValueTypeInfo> infos)
     {
         var typeName = table.EntryType();
         var strip = table.CommonPrefix();
@@ -130,12 +152,12 @@ public static class Templating
                 $"\t\tIndex{x.Ident.CSharpName(strip)} = index{x.Ident.CSharpName(strip)},"),
             "\t};",
             "",
-            .. table.Columns.Select(col =>
+            .. table.Columns.Select((col, i) =>
             {
                 var name = col.Ident.CSharpName(strip);
                 var valueName = $"value{name}";
                 return
-                    $"if (values.TryGetValue({col.Ident.Oid.Last()}, out var _{name}) && _{name} is {col.Type.AsAsnType()} {valueName}) entry.{name} = {valueName};";
+                    $"if (values.TryGetValue({col.Ident.Oid.Last()}, out var _{name}) && _{name} is {infos[i].AsnType} {valueName}) entry.{name} = {infos[i].FromAsn(valueName)};";
             }).Indent(),
             "",
             "\treturn entry;",
@@ -188,7 +210,7 @@ public static class Templating
         });
     }
 
-    public static string[] Populate(MibTable table)
+    internal static string[] Populate(MibTable table, IReadOnlyList<ValueTypeInfo> infos)
     {
         var strip = table.CommonPrefix();
         var indexParts = table.Index.SelectMany(index =>
@@ -220,7 +242,7 @@ public static class Templating
             "{",
             "\tvar indexOid = new List<uint>();",
             .. indexParts.Indent(),
-            .. table.Columns.SelectMany(col =>
+            .. table.Columns.SelectMany((col, i) =>
             {
                 var name = col.Ident.CSharpName(strip);
                 var valueName = $"value{name}";
@@ -228,7 +250,7 @@ public static class Templating
                 [
                     $"\tif ({name} is {{ }} {valueName})",
                     "\t{",
-                    $"\t\tresult[new Oid((uint[])[..Oid, 1, {col.Ident.Oid.Last()}, ..indexOid])] = {valueName};",
+                    $"\t\tresult[new Oid((uint[])[..Oid, 1, {col.Ident.Oid.Last()}, ..indexOid])] = {infos[i].ToAsn(valueName)};",
                     "\t}"
                 ];
             }),

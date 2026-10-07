@@ -112,3 +112,41 @@ Integer32 first = MyMib.SomeLeaf.CreateDefaultValue();
 Integer32 second = MyMib.SomeLeaf.CreateDefaultValue();
 // first and second have the same value but are different instances.
 ```
+
+For enumerated and BITS leaves `CreateDefaultValue()` returns the generated enum value instead (for example `Mode.Values.On` or `Flags.Bits.First | Flags.Bits.Ninth`).
+
+## Enumerations, BITS and constraints
+
+Named values are generated as C# enums, and leaves, table columns and notification objects use them instead of the raw ASN.1 type:
+
+| MIB syntax | Generated type | Location |
+| --- | --- | --- |
+| Inline `INTEGER { ... }` on a scalar | `enum Values : int` | Nested in the leaf class, e.g. `Mode.Values.AutoDetect` |
+| Inline `BITS { ... }` on a scalar | `[Flags] enum Bits : ulong` | Nested in the leaf class, e.g. `Flags.Bits.Ninth` |
+| Inline enum/BITS on a table column | `{Column}Values` / `{Column}Bits` | Nested in the table entry, e.g. `IfTableEntry.AdminStatusValues.Up` |
+| `TEXTUAL-CONVENTION` with enum/BITS syntax | `enum {Name}` | `Snmp.TextualConventions.{Module}`, e.g. `Snmp.TextualConventions.SNMPv2Tc.TruthValue` |
+
+Labels are PascalCased (`auto-detect` becomes `AutoDetect`), and labels that format to the same identifier get a numeric suffix (`FooBar`, `FooBar_2`). If the nested name would clash with its leaf class, `Enum` is appended (`Values.ValuesEnum`). BITS enums always include `None = 0`, and bit `n` maps to `1UL << n`.
+
+Enumerated leaves parse to `TEnum?` and expose a `ToAsn(TEnum)` helper that produces the wire value. Values that are not named in the MIB still round-trip as unnamed enum values. On the wire, BITS remain an `OctetString` (first octet, most significant bit = bit 0). The runtime `SnmpBits.ToMask(...)` and `SnmpBits.FromMask(...)` helpers convert between the two forms. A BITS type with a named bit above 63 cannot fit in a `ulong`, so it keeps the `OctetString` type.
+
+```csharp
+Mode.Values? mode = Mode.Parse(values);
+values[Mode.InstanceOid] = Mode.ToAsn(Mode.Values.AutoDetect);
+
+Flags.Bits? flags = Flags.Parse(values);
+OctetString wire = Flags.ToAsn(Flags.Bits.First | Flags.Bits.Ninth);
+```
+
+Range and size refinements on leaves that keep their ASN.1 type are exposed as constants and validators:
+
+```csharp
+long min = Percent.MinValue;          // INTEGER (0..100)
+bool ok = Percent.IsValidValue(42);
+int maxSize = Name.MaxSize;           // OCTET STRING (SIZE (0 | 4..8))
+bool valid = Name.IsValidSize(2);     // false: the validator honours every range
+```
+
+Table entries expose the same members prefixed with the column name, for example `LabelMinSize`, `LabelMaxSize` and `IsValidLabelSize(int)`.
+
+> **Breaking change:** leaves, table-entry fields and notification fields with enumerated or BITS syntax were previously typed as `Integer32` / `OctetString`. They now use the generated enums. To get the ASN.1 value, call the leaf's `ToAsn(...)` (or `new Integer32((int)value)` / `SnmpBits.FromMask((ulong)value)`).

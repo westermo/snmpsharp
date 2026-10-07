@@ -283,7 +283,8 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
                     ToOptionalString(metadata.DisplayHint),
                     metadata.Status,
                     metadata.Description.ToString(),
-                    ToOptionalString(metadata.Reference)));
+                    ToOptionalString(metadata.Reference),
+                    Identifier));
         }
 
         MibType ResolveType(AstType type)
@@ -680,6 +681,9 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
     /// <summary>All resolved items including table columns (columns are removed from Items after construction).</summary>
     public IReadOnlyDictionary<MibItemIdent, MibItem> AllItems => allItems;
 
+    /// <summary>All textual conventions defined by this module, keyed by name.</summary>
+    public IReadOnlyDictionary<string, MibType> TextualConventions => typedefsByName;
+
     public bool TryImport(string name, out MibItem? item, out MibType? type)
     {
         item = null;
@@ -761,7 +765,9 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
     {
         if (other is null) return false;
         if (ReferenceEquals(this, other)) return true;
-        return Identifier == other.Identifier && Items.DictEquals(other.Items);
+        return Identifier == other.Identifier
+            && Items.DictEquals(other.Items)
+            && typedefsByName.DictEquals(other.typedefsByName);
     }
 
     public override bool Equals(object? obj) => Equals(obj as MibModule);
