@@ -16,6 +16,7 @@
 
 using System;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 
 namespace SnmpSharpNet;
 
@@ -44,6 +45,7 @@ public class UInteger32 : AsnType, IComparable<UInteger32>, IComparable<uint>
     /// <param name="val">
     ///     Value to initialize the class with.
     /// </param>
+    [OverloadResolutionPriority(1)]
     public UInteger32(uint val) : this()
     {
         _value = val;
@@ -164,6 +166,16 @@ public class UInteger32 : AsnType, IComparable<UInteger32>, IComparable<uint>
     }
 
     /// <summary>
+    ///     Implicit casting of UInt32 value as UInteger32 class
+    /// </summary>
+    /// <param name="value">UInt32 value</param>
+    /// <returns>New UInteger32 class initialized with the value.</returns>
+    public static implicit operator UInteger32(uint value)
+    {
+        return new UInteger32(value);
+    }
+
+    /// <summary>
     ///     Compare class value against the object argument. Supported argument types are
     ///     <see cref="UInteger32" /> and Int32.
     /// </summary>
@@ -238,6 +250,114 @@ public class UInteger32 : AsnType, IComparable<UInteger32>, IComparable<uint>
         if (second is null) return false;
 
         return first.Value < second.Value;
+    }
+
+    /// <summary>Compare class value with an UInt32 value. A null reference is never equal to an UInt32 value.</summary>
+    /// <param name="first"><see cref="UInteger32" /> class value to compare</param>
+    /// <param name="second">UInt32 value to compare</param>
+    /// <returns>True if values match, otherwise false</returns>
+    public static bool operator ==(UInteger32? first, uint second)
+    {
+        return first is not null && first.Value == second;
+    }
+
+    /// <summary>Compare class value with an UInt32 value. A null reference is never equal to an UInt32 value.</summary>
+    /// <param name="first"><see cref="UInteger32" /> class value to compare</param>
+    /// <param name="second">UInt32 value to compare</param>
+    /// <returns>True if values do NOT match, otherwise false</returns>
+    public static bool operator !=(UInteger32? first, uint second)
+    {
+        return !(first == second);
+    }
+
+    /// <summary>Compare UInt32 value with a class value. A null reference is never equal to an UInt32 value.</summary>
+    /// <param name="first">UInt32 value to compare</param>
+    /// <param name="second"><see cref="UInteger32" /> class value to compare</param>
+    /// <returns>True if values match, otherwise false</returns>
+    public static bool operator ==(uint first, UInteger32? second)
+    {
+        return second == first;
+    }
+
+    /// <summary>Compare UInt32 value with a class value. A null reference is never equal to an UInt32 value.</summary>
+    /// <param name="first">UInt32 value to compare</param>
+    /// <param name="second"><see cref="UInteger32" /> class value to compare</param>
+    /// <returns>True if values do NOT match, otherwise false</returns>
+    public static bool operator !=(uint first, UInteger32? second)
+    {
+        return !(second == first);
+    }
+
+    /// <summary>Greater than operator. A null reference is less than any UInt32 value.</summary>
+    /// <param name="first">UInteger32 class</param>
+    /// <param name="second">UInt32 value</param>
+    /// <returns>True if class value is greater than the UInt32 value, otherwise false</returns>
+    public static bool operator >(UInteger32? first, uint second)
+    {
+        return first is not null && first.Value > second;
+    }
+
+    /// <summary>Less than operator. A null reference is less than any UInt32 value.</summary>
+    /// <param name="first">UInteger32 class</param>
+    /// <param name="second">UInt32 value</param>
+    /// <returns>True if class value is less than the UInt32 value, otherwise false</returns>
+    public static bool operator <(UInteger32? first, uint second)
+    {
+        return first is null || first.Value < second;
+    }
+
+    /// <summary>Greater than operator. A null reference is less than any UInt32 value.</summary>
+    /// <param name="first">UInt32 value</param>
+    /// <param name="second">UInteger32 class</param>
+    /// <returns>True if the UInt32 value is greater than class value, otherwise false</returns>
+    public static bool operator >(uint first, UInteger32? second)
+    {
+        return second < first;
+    }
+
+    /// <summary>Less than operator. A null reference is less than any UInt32 value.</summary>
+    /// <param name="first">UInt32 value</param>
+    /// <param name="second">UInteger32 class</param>
+    /// <returns>True if the UInt32 value is less than class value, otherwise false</returns>
+    public static bool operator <(uint first, UInteger32? second)
+    {
+        return second > first;
+    }
+
+    /// <summary>Add an UInt32 value to the class value. A null reference is treated as 0.</summary>
+    /// <param name="first">UInteger32 object</param>
+    /// <param name="second">UInt32 value</param>
+    /// <returns>Sum of the two values as UInt32</returns>
+    public static uint operator +(UInteger32? first, uint second)
+    {
+        return (first?.Value ?? 0) + second;
+    }
+
+    /// <summary>Add the class value to an UInt32 value. A null reference is treated as 0.</summary>
+    /// <param name="first">UInt32 value</param>
+    /// <param name="second">UInteger32 object</param>
+    /// <returns>Sum of the two values as UInt32</returns>
+    public static uint operator +(uint first, UInteger32? second)
+    {
+        return first + (second?.Value ?? 0);
+    }
+
+    /// <summary>Subtract an UInt32 value from the class value. A null reference is treated as 0.</summary>
+    /// <param name="first">UInteger32 object</param>
+    /// <param name="second">UInt32 value</param>
+    /// <returns>Difference of the two values as UInt32</returns>
+    public static uint operator -(UInteger32? first, uint second)
+    {
+        return (first?.Value ?? 0) - second;
+    }
+
+    /// <summary>Subtract the class value from an UInt32 value. A null reference is treated as 0.</summary>
+    /// <param name="first">UInt32 value</param>
+    /// <param name="second">UInteger32 object</param>
+    /// <returns>Difference of the two values as UInt32</returns>
+    public static uint operator -(uint first, UInteger32? second)
+    {
+        return first - (second?.Value ?? 0);
     }
 
     /// <summary>

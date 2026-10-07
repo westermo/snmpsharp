@@ -15,6 +15,7 @@
 // 
 
 using System;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace SnmpSharpNet;
@@ -51,6 +52,7 @@ public class TimeTicks : UInteger32, ICloneable
     ///     Constructor.
     /// </summary>
     /// <param name="value">Initialize the TimeTicks class to this unsigned integer value.</param>
+    [OverloadResolutionPriority(1)]
     public TimeTicks(uint value)
         : base(value)
     {
@@ -100,6 +102,30 @@ public class TimeTicks : UInteger32, ICloneable
         ticks *= 10000;
         var ts = new TimeSpan(ticks);
         return ts;
+    }
+
+    /// <summary>
+    ///     Operator to allow explicit conversion of a TimeSpan to a TimeTicks class.
+    /// </summary>
+    /// <remarks>
+    ///     TimeTicks has a resolution of 1/100th of a second; any remainder is truncated.
+    /// </remarks>
+    /// <param name="value">TimeSpan to convert to TimeTicks</param>
+    /// <returns>TimeTicks class representing the TimeSpan value.</returns>
+    /// <exception cref="OverflowException">TimeSpan is negative or too large to be represented as TimeTicks.</exception>
+    public static explicit operator TimeTicks(TimeSpan value)
+    {
+        return new TimeTicks(checked((uint)(value.Ticks / (TimeSpan.TicksPerMillisecond * 10))));
+    }
+
+    /// <summary>
+    ///     Implicit casting of UInt32 value (hundredths of a second) as TimeTicks class
+    /// </summary>
+    /// <param name="value">UInt32 value</param>
+    /// <returns>New TimeTicks class initialized with the value.</returns>
+    public static implicit operator TimeTicks(uint value)
+    {
+        return new TimeTicks(value);
     }
 
     /// <summary>

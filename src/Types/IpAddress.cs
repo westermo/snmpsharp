@@ -15,6 +15,7 @@
 // 
 
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Contracts;
 using System.Net;
 using System.Net.Sockets;
@@ -300,13 +301,28 @@ public sealed class IpAddress : OctetString, IComparable
         base.Set(ipaddr.GetAddressBytes());
     }
 
-    /// <summary>Allow explicit cast of the class as System.Net.IPAddress class.</summary>
+    /// <summary>Allow implicit cast of the class as System.Net.IPAddress class.</summary>
     /// <param name="ipaddr">IpAddress class</param>
-    /// <returns>IpAddress class value as System.Net.IPAddress class</returns>
-    public static explicit operator IPAddress(IpAddress ipaddr)
+    /// <returns>
+    ///     IpAddress class value as System.Net.IPAddress class, <see cref="IPAddress.Any" /> if the value is not a
+    ///     valid 4 byte address, or null if argument is null
+    /// </returns>
+    [return: NotNullIfNotNull(nameof(ipaddr))]
+    public static implicit operator IPAddress?(IpAddress? ipaddr)
     {
+        if (ipaddr is null) return null;
         if (ipaddr.Length != 4) return IPAddress.Any;
         return new IPAddress(ipaddr.GetData());
+    }
+
+    /// <summary>Allow explicit cast of System.Net.IPAddress class as IpAddress class.</summary>
+    /// <param name="ipaddr">IPv4 System.Net.IPAddress class</param>
+    /// <returns>New IpAddress class, or null if argument is null</returns>
+    /// <exception cref="OverflowException">Argument is not an IPv4 address.</exception>
+    [return: NotNullIfNotNull(nameof(ipaddr))]
+    public static explicit operator IpAddress?(IPAddress? ipaddr)
+    {
+        return ipaddr is null ? null : new IpAddress(ipaddr);
     }
 
     /// <summary> Returns the application string as a dotted decimal represented IP address.</summary>

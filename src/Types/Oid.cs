@@ -17,6 +17,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Linq;
 using System.Text;
@@ -794,13 +795,65 @@ public sealed class Oid : AsnType, ICloneable, IComparable, IEnumerable<uint>
     }
 
     /// <summary>
-    ///     Operator allowing explicit conversion from Oid class to integer array int[]
+    ///     Operator allowing implicit conversion from Oid class to unsigned integer array uint[]
     /// </summary>
-    /// <param name="oid">Oid to present as integer array int[]</param>
-    /// <returns>Integer array representing the Oid class value</returns>
-    public static explicit operator uint[](Oid oid)
+    /// <param name="oid">Oid to present as unsigned integer array uint[]</param>
+    /// <returns>Copy of the unsigned integer array representing the Oid class value, or null if argument is null</returns>
+    [return: NotNullIfNotNull(nameof(oid))]
+    public static implicit operator uint[]?(Oid? oid)
     {
-        return oid.GetData();
+        return oid?.ToArray();
+    }
+
+    /// <summary>
+    ///     Operator allowing implicit conversion from unsigned integer array uint[] to Oid class. Data is copied.
+    /// </summary>
+    /// <param name="ids">Unsigned integer array</param>
+    /// <returns>New Oid class, or null if argument is null</returns>
+    [return: NotNullIfNotNull(nameof(ids))]
+    public static implicit operator Oid?(uint[]? ids)
+    {
+        return ids is null ? null : new Oid(ids);
+    }
+
+    /// <summary>
+    ///     Operator allowing implicit conversion from a dotted decimal string (e.g. "1.3.6.1.2.1") to Oid class.
+    /// </summary>
+    /// <param name="value">Dotted decimal object identifier string</param>
+    /// <returns>New Oid class, or null if argument is null</returns>
+    /// <exception cref="FormatException">String contains an empty object identifier component (e.g. "1..3").</exception>
+    /// <exception cref="OverflowException">String contains a component that does not fit in an UInt32.</exception>
+    [return: NotNullIfNotNull(nameof(value))]
+    public static implicit operator Oid?(string? value)
+    {
+        return value is null ? null : new Oid(value);
+    }
+
+    /// <summary>
+    ///     Operator allowing implicit conversion from Oid class to a dotted decimal string. Equivalent to
+    ///     <see cref="ToString()" />.
+    /// </summary>
+    /// <param name="oid">Oid to convert</param>
+    /// <returns>Dotted decimal string, or null if argument is null</returns>
+    [return: NotNullIfNotNull(nameof(oid))]
+    public static implicit operator string?(Oid? oid)
+    {
+        return oid?.ToString();
+    }
+
+    /// <summary>
+    ///     String concatenation of a string and the dotted decimal representation of the Oid.
+    /// </summary>
+    /// <remarks>
+    ///     Defined to keep <c>"text" + oid</c> a string concatenation; without it the expression would be ambiguous
+    ///     with Oid addition because of the implicit string conversions.
+    /// </remarks>
+    /// <param name="str">String</param>
+    /// <param name="oid">Oid</param>
+    /// <returns>Concatenated string</returns>
+    public static string operator +(string? str, Oid? oid)
+    {
+        return str + oid?.ToString();
     }
 
     /// <summary>
