@@ -18,9 +18,11 @@ internal sealed class OidTreeNode(uint arc, OidTreeNode? parent)
     public bool IsValue => Item is MibLeaf or MibTable or MibNotification;
     public bool IsNamespace => !IsValue;
 
-    public void Define(string? rawName, string moduleName, MibItem? item)
+    public void Define(string? rawName, string moduleName, MibItem? item, bool overwriteItem = true)
     {
-        if (RawName is null && !string.IsNullOrWhiteSpace(rawName))
+        // Names like "<SNMPv2-SMI>" are placeholders for arcs of imported modules, not real names
+        if (RawName is null && !string.IsNullOrWhiteSpace(rawName)
+                            && !rawName!.StartsWith("<", StringComparison.Ordinal))
         {
             RawName = rawName;
         }
@@ -30,7 +32,7 @@ internal sealed class OidTreeNode(uint arc, OidTreeNode? parent)
             ModuleName = moduleName;
         }
 
-        if (item is not null)
+        if (item is not null && (overwriteItem || Item is null))
         {
             Item = item;
         }
@@ -53,7 +55,9 @@ internal sealed class OidTreeNode(uint arc, OidTreeNode? parent)
 
 internal static class OidTreeBuilder
 {
-    public static OidTreeNode Build(IEnumerable<KeyValuePair<string, MibModule>> modules)
+    public static OidTreeNode Build(
+        IEnumerable<KeyValuePair<string, MibModule>> modules,
+        IEnumerable<string>? builtinModules = null)
     {
         var root = new OidTreeNode(0, null);
 
@@ -78,6 +82,20 @@ internal static class OidTreeBuilder
             }
         }
 
+        // Builtin modules go last so they never override definitions from supplied MIB files
+        foreach (var builtinName in builtinModules ?? [])
+        {
+            if (!BuiltinMib.All.TryGetValue(builtinName, out var exports) || exports is not BuiltinMib builtin)
+            {
+                continue;
+            }
+
+            foreach (var itemEntry in builtin.Items)
+            {
+                Insert(root, itemEntry.Key, itemEntry.Key.Name, builtinName, itemEntry.Value, overwriteItem: false);
+            }
+        }
+
         return root;
     }
 
@@ -86,7 +104,8 @@ internal static class OidTreeBuilder
         MibItemIdent ident,
         string? finalName,
         string moduleName,
-        MibItem? item)
+        MibItem? item,
+        bool overwriteItem = true)
     {
         var namesOffset = ident.Oid.Length - ident.OidNames.Length;
         var node = root;
@@ -107,7 +126,7 @@ internal static class OidTreeBuilder
                 rawName = finalName;
             }
 
-            node.Define(rawName, moduleName, index == ident.Oid.Length - 1 ? item : null);
+            node.Define(rawName, moduleName, index == ident.Oid.Length - 1 ? item : null, overwriteItem);
         }
     }
 }

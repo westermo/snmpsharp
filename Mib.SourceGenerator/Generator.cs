@@ -7,7 +7,7 @@ using Microsoft.CodeAnalysis;
 
 namespace SnmpSharpNet.Mib.SourceGenerator;
 
-using AllMibs = (ValuedDictionary<string, MibModule>?, ImmutableArray<Diagnostic>?);
+using AllMibs = (ValuedDictionary<string, MibModule>?, ImmutableArray<Diagnostic>?, EquatableArray<string>?);
 
 [Generator]
 public sealed class SnmpGenerator : IIncrementalGenerator
@@ -61,13 +61,40 @@ public sealed class SnmpGenerator : IIncrementalGenerator
 
                 if (errors.Count > 0)
                 {
-                    return (null, [.. warnings, .. errors]);
+                    return (null, [.. warnings, .. errors], null);
                 }
+
+                // Builtin modules that are imported but not supplied as files are emitted from BuiltinMib.
+                // Their own dependencies are included transitively so their parent arcs are always named.
+                var builtinSet = new HashSet<string>(StringComparer.Ordinal);
+                var pending = new Queue<string>(asts.Values.SelectMany(x => x.Module.Value.Dependencies));
+                while (pending.Count > 0)
+                {
+                    var dep = pending.Dequeue();
+                    if (asts.ContainsKey(dep) || !BuiltinMib.All.TryGetValue(dep, out var exports)
+                                              || !builtinSet.Add(dep))
+                    {
+                        continue;
+                    }
+
+                    if (exports is BuiltinMib builtin)
+                    {
+                        foreach (var transitive in builtin.Dependencies)
+                        {
+                            pending.Enqueue(transitive);
+                        }
+                    }
+                }
+
+                var builtins = builtinSet
+                    .OrderBy(dep => dep, StringComparer.Ordinal)
+                    .ToArray();
 
                 // Return warnings together with the successful result so they can be emitted
                 var allDiagnostics = warnings.ToImmutableArray();
                 return (resolvedModules!,
-                    allDiagnostics.Length > 0 ? allDiagnostics : null);
+                    allDiagnostics.Length > 0 ? allDiagnostics : null,
+                    new EquatableArray<string>(builtins));
             });
 
         context.RegisterSourceOutput(context.CompilationProvider.Combine(allMibs), (ctx, x) =>
@@ -85,7 +112,7 @@ public sealed class SnmpGenerator : IIncrementalGenerator
                 if (mibs.Item1 is null) { return; }
             }
 
-            var tree = OidTreeBuilder.Build(mibs.Item1!);
+            var tree = OidTreeBuilder.Build(mibs.Item1!, mibs.Item3 ?? new EquatableArray<string>([]));
             foreach (var source in TreeTemplating.Generate(tree, compilation))
             {
                 ctx.AddSource(source.HintName, source.Source);
