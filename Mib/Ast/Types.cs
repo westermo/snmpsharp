@@ -21,6 +21,7 @@ public class AstType(
     // TypeRefinementValue = "(" Range ( "|" Range )* ")"
     // Range = <number> | <number> ".." <number>
     // Bounds outside the range of long (e.g. Counter64's 18446744073709551615 in SNMPv2-SMI) are clamped.
+    // NumberOptions.AllowLeadingSign omits AllowDecimalSeparator, so fractional bounds such as 1.9 are rejected.
     static readonly Parser<long> _bound =
         Terms.Decimal(NumberOptions.AllowLeadingSign)
             .Then(static x => x > long.MaxValue ? long.MaxValue : x < long.MinValue ? long.MinValue : (long)x);

@@ -616,6 +616,20 @@ An administratively assigned string, which may be used
     }
 
     [Test]
+    [Arguments("(1.9..2.9)")]
+    [Arguments("(1..2.5)")]
+    [Arguments("(1.5)")]
+    public async Task TypeRefinement_RejectsFractionalBounds(string refinement)
+    {
+        await Assert.That(() => MibParser.ParseModule($"""
+                TEST-MIB DEFINITIONS ::= BEGIN
+                Fractional ::= INTEGER {refinement}
+                END
+                """))
+            .Throws<Exception>();
+    }
+
+    [Test]
     public async Task ObjectIdentifierDefault_RejectsUnknownNamedComponent()
     {
         await Assert.That(() => MibParser.ParseModule("""
