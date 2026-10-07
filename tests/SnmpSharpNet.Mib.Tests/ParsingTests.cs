@@ -20,7 +20,72 @@ public abstract class ParseTestCase(string Name)
         yield return NotificationTypeAssignment;
         yield return IgnoredObjectGroup;
         yield return IgnoredModuleCompliance;
+        yield return MacroDefinitionItem;
+        yield return ChoiceTypeAssignment;
+        yield return TaggedTypeAssignment;
+        yield return UnsignedRangeBeyondInt64;
     }
+
+    public static readonly ParseTestCase MacroDefinitionItem = new ParseTestCase<ModuleItem>(
+        nameof(MacroDefinitionItem),
+        ModuleItem.Parser,
+        """
+        MODULE-IDENTITY MACRO ::=
+        BEGIN
+            TYPE NOTATION ::=
+                          "LAST-UPDATED" value(Update ExtUTCTime)
+                          "ORGANIZATION" Text
+                          RevisionPart
+            VALUE NOTATION ::=
+                          value(VALUE OBJECT IDENTIFIER)
+            RevisionPart ::=
+                          Revisions
+                        | empty
+            -- END inside a comment does not terminate the macro
+            Text ::= value(IA5String)
+        END
+        $
+        """
+    );
+
+    public static readonly ParseTestCase ChoiceTypeAssignment = new ParseTestCase<ModuleItem>(
+        nameof(ChoiceTypeAssignment),
+        ModuleItem.Parser,
+        """
+        SimpleSyntax ::=
+            CHOICE {
+                integer-value
+                    INTEGER (-2147483648..2147483647),
+                string-value
+                    OCTET STRING (SIZE (0..65535)),
+                objectID-value
+                    OBJECT IDENTIFIER
+            }
+        $
+        """
+    );
+
+    public static readonly ParseTestCase TaggedTypeAssignment = new ParseTestCase<ModuleItem>(
+        nameof(TaggedTypeAssignment),
+        ModuleItem.Parser,
+        """
+        Counter32 ::=
+            [APPLICATION 1]
+                IMPLICIT INTEGER (0..4294967295)
+        $
+        """
+    );
+
+    public static readonly ParseTestCase UnsignedRangeBeyondInt64 = new ParseTestCase<ModuleItem>(
+        nameof(UnsignedRangeBeyondInt64),
+        ModuleItem.Parser,
+        """
+        Counter64 ::=
+            [APPLICATION 6]
+                IMPLICIT INTEGER (0..18446744073709551615)
+        $
+        """
+    );
 
     public static readonly ParseTestCase EmptyModule = new ParseTestCase<ModuleDefinition>(
         nameof(EmptyModule),

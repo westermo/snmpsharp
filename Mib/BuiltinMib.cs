@@ -102,12 +102,17 @@ public class BuiltinMib : IMibThatExports
             ["Opaque"] = MibType.Opaque,
             ["Counter64"] = MibType.Counter64,
             ["ExtUTCTime"] = MibType.OctetString.WithSize(11).WithSize(13),
+            ["ObjectName"] = MibType.ObjectIdentifier,
+            ["NotificationName"] = MibType.ObjectIdentifier,
         },
         [
             "MODULE-IDENTITY",
             "OBJECT-IDENTITY",
             "OBJECT-TYPE",
             "NOTIFICATION-TYPE",
+            "ObjectSyntax",
+            "SimpleSyntax",
+            "ApplicationSyntax",
         ]
     );
 
@@ -120,6 +125,7 @@ public class BuiltinMib : IMibThatExports
             "MODULE-COMPLIANCE",
             "OBJECT-GROUP",
             "NOTIFICATION-GROUP",
+            "AGENT-CAPABILITIES",
         ]
     );
 
@@ -170,6 +176,7 @@ public class BuiltinMib : IMibThatExports
                 .WithNamedValue("readOnly", 5),
             ["TDomain"] = MibType.ObjectIdentifier,
             ["TAddress"] = MibType.OctetString.WithSize(1, 255),
+            ["InstancePointer"] = MibType.ObjectIdentifier,
         },
         [
             "TEXTUAL-CONVENTION",

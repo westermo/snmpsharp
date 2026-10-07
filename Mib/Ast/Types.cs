@@ -20,9 +20,14 @@ public class AstType(
     // Based on https://www.rfc-editor.org/rfc/rfc2578.html#section-11.1
     // TypeRefinementValue = "(" Range ( "|" Range )* ")"
     // Range = <number> | <number> ".." <number>
+    // Bounds outside the range of long (e.g. Counter64's 18446744073709551615 in SNMPv2-SMI) are clamped.
+    static readonly Parser<long> _bound =
+        Terms.Decimal(NumberOptions.AllowLeadingSign)
+            .Then(static x => x > long.MaxValue ? long.MaxValue : x < long.MinValue ? long.MinValue : (long)x);
+
     static readonly Parser<(long Min, long Max)> _range =
-        Terms.Integer()
-            .And(Terms.Text("..").SkipAnd(Terms.Integer()).Optional())
+        _bound
+            .And(Terms.Text("..").SkipAnd(_bound).Optional())
             .Then(x => {
                 var min = x.Item1;
                 var max = x.Item2.OrSome(x.Item1);
