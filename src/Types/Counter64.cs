@@ -16,6 +16,7 @@
 
 using System;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 
 namespace SnmpSharpNet;
 
@@ -46,6 +47,7 @@ public class Counter64 : AsnType, IComparable<ulong>, IComparable<Counter64>, IC
     /// <param name="value">
     ///     Value to set class value.
     /// </param>
+    [OverloadResolutionPriority(1)]
     public Counter64(long value) : this()
     {
         _value = Convert.ToUInt64(value);
@@ -64,6 +66,7 @@ public class Counter64 : AsnType, IComparable<ulong>, IComparable<Counter64>, IC
     /// <param name="value">
     ///     Value to initialize the class with.
     /// </param>
+    [OverloadResolutionPriority(1)]
     public Counter64(ulong value) : this()
     {
         _value = value;
@@ -211,6 +214,124 @@ public class Counter64 : AsnType, IComparable<ulong>, IComparable<Counter64>, IC
     public static implicit operator ulong(Counter64 value)
     {
         return value.Value;
+    }
+
+    /// <summary>
+    ///     Implicit casting of UInt64 value as Counter64 class
+    /// </summary>
+    /// <param name="value">UInt64 value</param>
+    /// <returns>New Counter64 class initialized with the value.</returns>
+    public static implicit operator Counter64(ulong value)
+    {
+        return new Counter64(value);
+    }
+
+    /// <summary>Compare class value with an UInt64 value. A null reference is never equal to an UInt64 value.</summary>
+    /// <param name="first"><see cref="Counter64" /> class value to compare</param>
+    /// <param name="second">UInt64 value to compare</param>
+    /// <returns>True if values match, otherwise false</returns>
+    public static bool operator ==(Counter64? first, ulong second)
+    {
+        return first is not null && first.Value == second;
+    }
+
+    /// <summary>Compare class value with an UInt64 value. A null reference is never equal to an UInt64 value.</summary>
+    /// <param name="first"><see cref="Counter64" /> class value to compare</param>
+    /// <param name="second">UInt64 value to compare</param>
+    /// <returns>True if values do NOT match, otherwise false</returns>
+    public static bool operator !=(Counter64? first, ulong second)
+    {
+        return !(first == second);
+    }
+
+    /// <summary>Compare UInt64 value with a class value. A null reference is never equal to an UInt64 value.</summary>
+    /// <param name="first">UInt64 value to compare</param>
+    /// <param name="second"><see cref="Counter64" /> class value to compare</param>
+    /// <returns>True if values match, otherwise false</returns>
+    public static bool operator ==(ulong first, Counter64? second)
+    {
+        return second == first;
+    }
+
+    /// <summary>Compare UInt64 value with a class value. A null reference is never equal to an UInt64 value.</summary>
+    /// <param name="first">UInt64 value to compare</param>
+    /// <param name="second"><see cref="Counter64" /> class value to compare</param>
+    /// <returns>True if values do NOT match, otherwise false</returns>
+    public static bool operator !=(ulong first, Counter64? second)
+    {
+        return !(second == first);
+    }
+
+    /// <summary>Greater than operator. A null reference is never greater or less than an UInt64 value.</summary>
+    /// <param name="first">Counter64 class</param>
+    /// <param name="second">UInt64 value</param>
+    /// <returns>True if class value is greater than the UInt64 value, otherwise false</returns>
+    public static bool operator >(Counter64? first, ulong second)
+    {
+        return first?.Value > second;
+    }
+
+    /// <summary>Less than operator. A null reference is never greater or less than an UInt64 value.</summary>
+    /// <param name="first">Counter64 class</param>
+    /// <param name="second">UInt64 value</param>
+    /// <returns>True if class value is less than the UInt64 value, otherwise false</returns>
+    public static bool operator <(Counter64? first, ulong second)
+    {
+        return first?.Value < second;
+    }
+
+    /// <summary>Greater than operator. A null reference is never greater or less than an UInt64 value.</summary>
+    /// <param name="first">UInt64 value</param>
+    /// <param name="second">Counter64 class</param>
+    /// <returns>True if the UInt64 value is greater than class value, otherwise false</returns>
+    public static bool operator >(ulong first, Counter64? second)
+    {
+        return first > second?.Value;
+    }
+
+    /// <summary>Less than operator. A null reference is never greater or less than an UInt64 value.</summary>
+    /// <param name="first">UInt64 value</param>
+    /// <param name="second">Counter64 class</param>
+    /// <returns>True if the UInt64 value is less than class value, otherwise false</returns>
+    public static bool operator <(ulong first, Counter64? second)
+    {
+        return first < second?.Value;
+    }
+
+    /// <summary>Add an UInt64 value to the class value. A null reference is treated as 0.</summary>
+    /// <param name="first">Counter64 object</param>
+    /// <param name="second">UInt64 value</param>
+    /// <returns>Sum of the two values as UInt64</returns>
+    public static ulong operator +(Counter64? first, ulong second)
+    {
+        return (first?.Value ?? 0) + second;
+    }
+
+    /// <summary>Add the class value to an UInt64 value. A null reference is treated as 0.</summary>
+    /// <param name="first">UInt64 value</param>
+    /// <param name="second">Counter64 object</param>
+    /// <returns>Sum of the two values as UInt64</returns>
+    public static ulong operator +(ulong first, Counter64? second)
+    {
+        return first + (second?.Value ?? 0);
+    }
+
+    /// <summary>Subtract an UInt64 value from the class value. A null reference is treated as 0.</summary>
+    /// <param name="first">Counter64 object</param>
+    /// <param name="second">UInt64 value</param>
+    /// <returns>Difference of the two values as UInt64</returns>
+    public static ulong operator -(Counter64? first, ulong second)
+    {
+        return (first?.Value ?? 0) - second;
+    }
+
+    /// <summary>Subtract the class value from an UInt64 value. A null reference is treated as 0.</summary>
+    /// <param name="first">UInt64 value</param>
+    /// <param name="second">Counter64 object</param>
+    /// <returns>Difference of the two values as UInt64</returns>
+    public static ulong operator -(ulong first, Counter64? second)
+    {
+        return first - (second?.Value ?? 0);
     }
 
     /// <summary>

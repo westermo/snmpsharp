@@ -15,6 +15,7 @@
 // 
 
 using System;
+using System.Runtime.CompilerServices;
 
 namespace SnmpSharpNet;
 
@@ -75,6 +76,7 @@ public class Gauge32 : UInteger32, ICloneable
     ///     Constructor
     /// </summary>
     /// <param name="val">Initializing value</param>
+    [OverloadResolutionPriority(1)]
     public Gauge32(uint val) : base(val)
     {
         _asnType = SnmpConstants.SMI_GAUGE32;
@@ -87,5 +89,15 @@ public class Gauge32 : UInteger32, ICloneable
     public override object Clone()
     {
         return new Gauge32(this);
+    }
+
+    /// <summary>
+    ///     Implicit casting of UInt32 value as Gauge32 class
+    /// </summary>
+    /// <param name="value">UInt32 value</param>
+    /// <returns>New Gauge32 class initialized with the value.</returns>
+    public static implicit operator Gauge32(uint value)
+    {
+        return new Gauge32(value);
     }
 }
