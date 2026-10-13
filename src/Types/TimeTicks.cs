@@ -115,6 +115,9 @@ public class TimeTicks : UInteger32, ICloneable
     /// <exception cref="OverflowException">TimeSpan is negative or too large to be represented as TimeTicks.</exception>
     public static explicit operator TimeTicks(TimeSpan value)
     {
+        if (value < TimeSpan.Zero)
+            throw new OverflowException("A negative TimeSpan cannot be represented as TimeTicks.");
+
         return new TimeTicks(checked((uint)(value.Ticks / (TimeSpan.TicksPerMillisecond * 10))));
     }
 
