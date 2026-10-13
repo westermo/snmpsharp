@@ -72,6 +72,17 @@ public class SourceGeneratorIntegrationTests
     }
 
     [Test]
+    public async Task GeneratedBuiltinBranches_ExposeOids()
+    {
+        await Assert.That(global::Snmp.Iso.Org.Dod.Internet.Private.Enterprises.Id.Oid)
+            .IsEquivalentTo(new Oid("1.3.6.1.4.1"));
+        await Assert.That(global::Snmp.Iso.Org.Dod.Internet.Mgmt.Mib2.Transmission.Id.Oid)
+            .IsEquivalentTo(new Oid("1.3.6.1.2.1.10"));
+        await Assert.That(global::Snmp.Itu.ZeroDotZero.Id.Oid)
+            .IsEquivalentTo(new Oid("0.0"));
+    }
+
+    [Test]
     public async Task GeneratedNotification_CanBeParsedFromTrapPdu()
     {
         var linkUp = new LinkUp([2])

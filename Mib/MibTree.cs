@@ -1,12 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using SnmpSharpNet.Mib.Ast;
 
 namespace SnmpSharpNet.Mib;
 
 /// <summary>
 /// A node in the merged OID tree of one or more resolved <see cref="MibModule"/>s.
-/// The root node returned by <see cref="MibTree.Build(IEnumerable{MibModule})"/> is synthetic
+/// The root node returned by <see cref="MibTree.Build(IEnumerable{MibModule}, IEnumerable{string})"/> is synthetic
 /// (it has no arc of its own) and its children are the top-level arcs (itu-t, iso, joint-iso-itu-t).
 /// </summary>
 public sealed class MibTreeNode
@@ -129,16 +130,17 @@ public sealed class MibTreeNode
         return child;
     }
 
-    internal void Define(string? name, string moduleName, MibItem? item)
+    internal void Define(string? name, string moduleName, MibItem? item, bool overwriteItem = true)
     {
-        if (Name is null && !string.IsNullOrWhiteSpace(name))
+        // Names like "<SNMPv2-SMI>" are placeholders for arcs of imported modules, not real names
+        if (Name is null && !string.IsNullOrWhiteSpace(name) && !name!.StartsWith("<", StringComparison.Ordinal))
         {
             Name = name;
         }
 
         ModuleName ??= moduleName;
 
-        if (item is not null)
+        if (item is not null && (overwriteItem || Item is null))
         {
             Item = item;
         }
@@ -148,10 +150,17 @@ public sealed class MibTreeNode
 /// <summary>Builds a merged OID tree from resolved MIB modules.</summary>
 public static class MibTree
 {
-    public static MibTreeNode Build(IEnumerable<MibModule> modules) =>
-        Build(modules.Select(module => new KeyValuePair<string, MibModule>(module.Identifier, module)));
+    /// <summary>
+    /// Builds the OID tree of <paramref name="modules"/>, optionally including the named
+    /// <paramref name="builtinModules"/> (see <see cref="GetBuiltinDependencies(IEnumerable{ModuleDefinition})"/>).
+    /// </summary>
+    public static MibTreeNode Build(IEnumerable<MibModule> modules, IEnumerable<string>? builtinModules = null) =>
+        Build(modules.Select(module => new KeyValuePair<string, MibModule>(module.Identifier, module)), builtinModules);
 
-    public static MibTreeNode Build(IEnumerable<KeyValuePair<string, MibModule>> modules)
+    /// <inheritdoc cref="Build(IEnumerable{MibModule}, IEnumerable{string})"/>
+    public static MibTreeNode Build(
+        IEnumerable<KeyValuePair<string, MibModule>> modules,
+        IEnumerable<string>? builtinModules = null)
     {
         var root = new MibTreeNode(0, null);
 
@@ -173,7 +182,65 @@ public static class MibTree
             }
         }
 
+        // Builtin modules go last so they never override definitions from supplied modules
+        foreach (var builtinName in builtinModules ?? [])
+        {
+            if (!BuiltinMib.All.TryGetValue(builtinName, out var exports) || exports is not BuiltinMib builtin)
+            {
+                continue;
+            }
+
+            foreach (var itemEntry in builtin.Items)
+            {
+                Insert(root, itemEntry.Key, itemEntry.Key.Name, builtinName, itemEntry.Value, overwriteItem: false);
+            }
+        }
+
         return root;
+    }
+
+    /// <summary>
+    /// Returns the builtin modules (such as SNMPv2-SMI) imported by <paramref name="modules"/> but not supplied
+    /// by them, including the builtin modules' own dependencies, ordered by name. Modules are keyed by identifier.
+    /// </summary>
+    public static IReadOnlyList<string> GetBuiltinDependencies(IEnumerable<ModuleDefinition> modules)
+    {
+        var byName = new Dictionary<string, ModuleDefinition>(StringComparer.Ordinal);
+        foreach (var module in modules)
+        {
+            byName[module.Identifier.ToString()] = module;
+        }
+
+        return GetBuiltinDependencies(byName);
+    }
+
+    /// <summary>
+    /// Returns the builtin modules imported by the supplied <paramref name="modules"/> (keyed by module name)
+    /// but not supplied by them, including the builtin modules' own dependencies, ordered by name.
+    /// </summary>
+    public static IReadOnlyList<string> GetBuiltinDependencies(IReadOnlyDictionary<string, ModuleDefinition> modules)
+    {
+        var builtins = new HashSet<string>(StringComparer.Ordinal);
+        var pending = new Queue<string>(modules.Values.SelectMany(module => module.Dependencies));
+        while (pending.Count > 0)
+        {
+            var dependency = pending.Dequeue();
+            if (modules.ContainsKey(dependency) || !BuiltinMib.All.TryGetValue(dependency, out var exports)
+                                                || !builtins.Add(dependency))
+            {
+                continue;
+            }
+
+            if (exports is BuiltinMib builtin)
+            {
+                foreach (var transitive in builtin.Dependencies)
+                {
+                    pending.Enqueue(transitive);
+                }
+            }
+        }
+
+        return builtins.OrderBy(name => name, StringComparer.Ordinal).ToArray();
     }
 
     private static void Insert(
@@ -181,7 +248,8 @@ public static class MibTree
         MibItemIdent ident,
         string? finalName,
         string moduleName,
-        MibItem? item)
+        MibItem? item,
+        bool overwriteItem = true)
     {
         var namesOffset = ident.Oid.Length - ident.OidNames.Length;
         var node = root;
@@ -195,7 +263,7 @@ public static class MibTree
                 name = finalName;
             }
 
-            node.Define(name, moduleName, index == ident.Oid.Length - 1 ? item : null);
+            node.Define(name, moduleName, index == ident.Oid.Length - 1 ? item : null, overwriteItem);
         }
     }
 }

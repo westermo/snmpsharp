@@ -114,4 +114,30 @@ public class MibTreeTests
             return x.Length.CompareTo(y.Length);
         }
     }
+
+    [Test]
+    public async Task Build_IncludesUnsuppliedBuiltinDependencies()
+    {
+        const string mib = """
+            BUILTIN-DEPS-TEST-MIB DEFINITIONS ::= BEGIN
+            IMPORTS enterprises FROM SNMPv2-SMI DisplayString FROM SNMPv2-TC;
+            builtinDepsTest OBJECT IDENTIFIER ::= { enterprises 99999 }
+            END
+            """;
+        var asts = new[] { MibParser.ParseAst(mib, "BUILTIN-DEPS-TEST-MIB") };
+
+        var builtins = MibTree.GetBuiltinDependencies(asts);
+        await Assert.That(builtins).IsEquivalentTo(new[] { "SNMPv2-SMI", "SNMPv2-TC" });
+
+        var root = MibTree.Build(MibParser.ParseModules(asts), builtins);
+        await Assert.That(root.TryFind([1, 3, 6, 1, 2, 1, 10], out var transmission)).IsTrue();
+        await Assert.That(transmission.Name).IsEqualTo("transmission");
+        await Assert.That(transmission.ModuleName).IsEqualTo("SNMPv2-SMI");
+        await Assert.That(root.TryFind([1, 3, 6, 1, 4, 1, 99999], out var own)).IsTrue();
+        await Assert.That(own.ModuleName).IsEqualTo("BUILTIN-DEPS-TEST-MIB");
+
+        // Supplying a module removes it from the builtin dependencies
+        var supplied = MibTree.GetBuiltinDependencies(asts.Append(MibParser.ParseAstFile(Path.Combine(MibDir, "SNMPv2-SMI.mib"))));
+        await Assert.That(supplied).IsEquivalentTo(new[] { "SNMPv2-TC" });
+    }
 }

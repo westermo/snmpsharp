@@ -293,7 +293,8 @@ public class ModuleDefinition(
 
 public abstract class ModuleItem
 {
-    // ModuleItem = EntryDef
+    // ModuleItem = MacroDefinition
+    //            | EntryDef
     //            | TextualConvention
     //            // Compliance, ignored
     //            | ObjectGroup
@@ -308,8 +309,10 @@ public abstract class ModuleItem
     //            | ConceptualTable
     //            | ConceptualRow | AugmentingConceptualRow
     //            | LeafObject
+    //            | TypeAssignment
     public static readonly Parser<ModuleItem> Parser =
         OneOf<ModuleItem>(
+            MacroDefinition.InnerParser,
             EntryDef.Parser,
             TextualConvention.Parser,
             MacroObjectGroup.InnerParser,
@@ -324,7 +327,8 @@ public abstract class ModuleItem
             ConceptualTable.InnerParser,
             AugmentingConceptualRow.InnerParser,
             ConceptualRow.InnerParser,
-            LeafObject.InnerParser
+            LeafObject.InnerParser,
+            TypeAssignment.InnerParser
         ).WithName("ModuleItem");
 }
 
@@ -873,4 +877,85 @@ public class MacroTrapType : ModuleItem
             .AndSkip(Terms.Integer())
             .Then(static _ => instance)
             .WithName("TrapType");
+}
+
+// ASN.1 `MACRO` definition, e.g. `OBJECT-TYPE MACRO ::= BEGIN ... END`.
+// These only appear in the core SMI modules (SNMPv2-SMI, SNMPv2-TC, SNMPv2-CONF), whose macros
+// are understood natively by the parser, so the body is skipped.
+public class MacroDefinition(TextSpan name) : ModuleItem
+{
+    public TextSpan Name { get; } = name;
+
+    // Body tokens are consumed one at a time so that comments and strings containing "END"
+    // don't terminate the macro early.
+    static readonly Parser<TextSpan> BodyToken =
+        Not(Terms.Keyword("END"))
+            .SkipAnd(OneOf(
+                SMIv2.String,
+                Terms.Pattern(static c => !char.IsWhiteSpace(c) && c != '"')));
+
+    //  MacroDefinition = IDENT "MACRO" "::=" "BEGIN" <raw> "END"
+    public static readonly Parser<MacroDefinition> InnerParser =
+        SMIv2.Ident
+            .AndSkip(Terms.Keyword("MACRO"))
+            .AndSkip(Terms.Text("::=").ElseError("Expected '::=' after MACRO"))
+            .AndSkip(Terms.Keyword("BEGIN").ElseError("Expected 'BEGIN' in MACRO definition"))
+            .AndSkip(BodyToken.ZeroOrMany())
+            .AndSkip(Terms.Keyword("END").ElseError("Expected 'END' after MACRO definition"))
+            .Then(static x => new MacroDefinition(x))
+            .WithName("MacroDefinition");
+}
+
+// Plain ASN.1 type assignment, e.g. `Integer32 ::= INTEGER (-2147483648..2147483647)`.
+// Used by the core SMI modules (and SMIv1-style MIBs) to define base types.
+// `Syntax` is null for CHOICE types, which can't be used as an object syntax.
+public class TypeAssignment(TextSpan name, AstType? syntax) : ModuleItem
+{
+    public TextSpan Name { get; } = name;
+    public AstType? Syntax { get; } = syntax;
+
+    // Tag = "[" ("UNIVERSAL" | "APPLICATION" | "PRIVATE")? <number> "]" ("IMPLICIT" | "EXPLICIT")?
+    // Returns the tag number for APPLICATION tags, null otherwise.
+    static readonly Parser<long?> Tag =
+        Terms.Char('[')
+            .SkipAnd(OneOf(
+                Terms.Keyword("APPLICATION").Then(static _ => true),
+                Terms.Keyword("UNIVERSAL").Then(static _ => false),
+                Terms.Keyword("PRIVATE").Then(static _ => false)).Optional())
+            .And(Terms.Integer())
+            .AndSkip(Terms.Char(']').ElseError("Expected ']' after tag number"))
+            .AndSkip(OneOf(Terms.Keyword("IMPLICIT"), Terms.Keyword("EXPLICIT")).Optional())
+            .Then(static x => x.Item1.OrSome(false) ? x.Item2 : (long?)null);
+
+    // Choice = "CHOICE" "{" IDENT Type ("," IDENT Type)* "}"
+    static readonly Parser<AstType?> Choice =
+        Terms.Keyword("CHOICE")
+            .SkipAnd(SMIv2.Block(Separated(Terms.Char(','), SMIv2.Ident.And(AstType.Parser))))
+            .Then(static _ => (AstType?)null);
+
+    //  TypeAssignment = IDENT "::=" Tag? (Choice | Type)
+    public static readonly Parser<TypeAssignment> InnerParser =
+        SMIv2.Ident
+            .AndSkip(Terms.Text("::="))
+            .And(Tag.Optional())
+            .And(OneOf(Choice, AstType.Parser.Then(static x => (AstType?)x)))
+            .Then(static x => new TypeAssignment(x.Item1, ApplyTag(x.Item1, x.Item2.OrSome(null), x.Item3)))
+            .WithName("TypeAssignment");
+
+    // The SMI application types are defined in SNMPv2-SMI as tagged INTEGERs and OCTET STRINGs,
+    // see section 7.1 of RFC 2578 and RFC 3416.
+    static AstType? ApplyTag(TextSpan name, long? applicationTag, AstType? syntax) =>
+        syntax is null
+            ? null
+            : applicationTag switch
+            {
+                0 => new AstType(TypeKind.IpAddress),
+                1 => new AstType(TypeKind.Counter32),
+                2 when name.ToString() == "Unsigned32" => new AstType(TypeKind.Unsigned32, Refinement.AllValues),
+                2 => new AstType(TypeKind.Gauge32, Refinement.AllValues),
+                3 => new AstType(TypeKind.TimeTicks),
+                4 => new AstType(TypeKind.Opaque),
+                6 => new AstType(TypeKind.Counter64),
+                _ => syntax
+            };
 }

@@ -82,15 +82,30 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
         // Second pass:
         // Resolve all types
         // 
-        var localTypesByName = module.Items
-            .OfType<TextualConvention>()
-            .ToDictionary(x => x.Name.ToString());
-
         var typeResolutionStack = new HashSet<string>();
+        var localTypesByName = new Dictionary<string, Func<MibType>>();
+        foreach (var tc in module.Items.OfType<TextualConvention>())
+        {
+            localTypesByName.Add(tc.Name.ToString(), () => ResolveTextualConvention(tc));
+        }
 
-        typedefsByName = module.Items
-            .OfType<TextualConvention>()
-            .ToDictionary(x => x.Name.ToString(), ResolveTextualConvention);
+        foreach (var ta in module.Items.OfType<TypeAssignment>().Where(x => x.Syntax is not null))
+        {
+            localTypesByName.Add(ta.Name.ToString(), () => ResolveTypeAssignment(ta));
+        }
+
+        foreach (var localType in localTypesByName)
+        {
+            typedefsByName[localType.Key] = localType.Value();
+        }
+
+        // Macros and CHOICE types (only found in the core SMI modules) can be imported, but carry no type
+        foreach (var name in module.Items.OfType<MacroDefinition>().Select(x => x.Name.ToString())
+                     .Concat(module.Items.OfType<TypeAssignment>().Where(x => x.Syntax is null)
+                         .Select(x => x.Name.ToString())))
+        {
+            keywords.Add(name);
+        }
 
         var entryTypes = module.Items
             .OfType<EntryDef>()
@@ -286,6 +301,17 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
                     ToOptionalString(metadata.Reference)));
         }
 
+        MibType ResolveTypeAssignment(TypeAssignment typeAssignment)
+        {
+            var resolved = ResolveType(typeAssignment.Syntax!);
+            return new MibType(
+                resolved.Kind,
+                resolved.Refinement,
+                resolved.Values,
+                typeAssignment.Name.ToString(),
+                resolved.TextualConvention);
+        }
+
         MibType ResolveType(AstType type)
         {
             if (type.Kind is { } kind)
@@ -306,9 +332,9 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
             try
             {
                 MibType resolved;
-                if (localTypesByName.TryGetValue(typeName, out var localType))
+                if (localTypesByName.TryGetValue(typeName, out var resolveLocal))
                 {
-                    resolved = ResolveTextualConvention(localType);
+                    resolved = resolveLocal();
                 }
                 else if (importedTypes.TryGetValue(typeName, out var importedType))
                 {
@@ -672,6 +698,7 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
     //
     private readonly Dictionary<string, MibItemIdent> oidByName = [];
     private readonly Dictionary<string, MibType> typedefsByName = [];
+    private readonly HashSet<string> keywords = [];
     private readonly Dictionary<MibItemIdent, MibItem> allItems = [];
 
     /// <summary>All named OID arcs defined in this module, including pure OBJECT IDENTIFIER navigation nodes.</summary>
@@ -704,7 +731,7 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
         }
 
         var typed = typedefsByName.TryGetValue(name, out type);
-        return valued || typed;
+        return valued || typed || keywords.Contains(name);
     }
 
     public bool TryImportObject(string name, [MaybeNullWhen(false)] out MibItem item)
@@ -761,7 +788,10 @@ public class MibModule : IMibThatExports, IEquatable<MibModule>
     {
         if (other is null) return false;
         if (ReferenceEquals(this, other)) return true;
-        return Identifier == other.Identifier && Items.DictEquals(other.Items);
+        return Identifier == other.Identifier
+               && Items.DictEquals(other.Items)
+               && oidByName.DictEquals(other.oidByName)
+               && keywords.SetEquals(other.keywords);
     }
 
     public override bool Equals(object? obj) => Equals(obj as MibModule);

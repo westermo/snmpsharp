@@ -7,7 +7,7 @@ using Microsoft.CodeAnalysis;
 
 namespace SnmpSharpNet.Mib.SourceGenerator;
 
-using AllMibs = (ValuedDictionary<string, MibModule>?, ImmutableArray<Diagnostic>?, ValuedDictionary<string, string>?);
+using AllMibs = (ValuedDictionary<string, MibModule>?, ImmutableArray<Diagnostic>?, ValuedDictionary<string, string>?, EquatableArray<string>?);
 
 [Generator]
 public sealed class SnmpGenerator : IIncrementalGenerator
@@ -70,17 +70,23 @@ public sealed class SnmpGenerator : IIncrementalGenerator
 
                 if (errors.Count > 0)
                 {
-                    return (null, [.. warnings, .. errors], null);
+                    return (null, [.. warnings, .. errors], null, null);
                 }
 
                 var sources = new ValuedDictionary<string, string>(
                     asts.ToDictionary(x => x.Key, x => x.Value.Source));
 
+                // Builtin modules that are imported but not supplied as files are emitted from BuiltinMib.
+                // Their own dependencies are included transitively so their parent arcs are always named.
+                var builtins = MibTree.GetBuiltinDependencies(
+                    asts.ToDictionary(x => x.Key, x => x.Value.Module.Value));
+
                 // Return warnings together with the successful result so they can be emitted
                 var allDiagnostics = warnings.ToImmutableArray();
                 return (resolvedModules!,
                     allDiagnostics.Length > 0 ? allDiagnostics : null,
-                    sources);
+                    sources,
+                    new EquatableArray<string>([.. builtins]));
             });
 
         context.RegisterSourceOutput(context.CompilationProvider.Combine(allMibs).Combine(embedSources), (ctx, x) =>
@@ -99,7 +105,7 @@ public sealed class SnmpGenerator : IIncrementalGenerator
                 if (mibs.Item1 is null) { return; }
             }
 
-            var tree = MibTree.Build(mibs.Item1!);
+            var tree = MibTree.Build(mibs.Item1!, mibs.Item4);
             foreach (var source in TreeTemplating.Generate(tree, compilation))
             {
                 ctx.AddSource(source.HintName, source.Source);
