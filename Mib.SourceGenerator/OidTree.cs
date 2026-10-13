@@ -5,111 +5,12 @@ using System.Linq;
 
 namespace SnmpSharpNet.Mib.SourceGenerator;
 
-internal sealed class OidTreeNode(uint arc, OidTreeNode? parent)
+internal static class MibTreeNodeExtensions
 {
-    public uint Arc { get; } = arc;
-    public OidTreeNode? Parent { get; } = parent;
-    public string? RawName { get; private set; }
-    public string? ModuleName { get; private set; }
-    public MibItem? Item { get; private set; }
-    public Dictionary<uint, OidTreeNode> Children { get; } = [];
+    public static bool IsNamespace(this MibTreeNode node) => !node.IsValue;
 
-    public bool IsNotification => Item is MibNotification;
-    public bool IsValue => Item is MibLeaf or MibTable or MibNotification;
-    public bool IsNamespace => !IsValue;
-
-    public void Define(string? rawName, string moduleName, MibItem? item)
-    {
-        if (RawName is null && !string.IsNullOrWhiteSpace(rawName))
-        {
-            RawName = rawName;
-        }
-
-        if (ModuleName is null)
-        {
-            ModuleName = moduleName;
-        }
-
-        if (item is not null)
-        {
-            Item = item;
-        }
-    }
-
-    public IEnumerable<OidTreeNode> AncestorsAndSelf()
-    {
-        var stack = new Stack<OidTreeNode>();
-        for (var node = this; node is not null; node = node.Parent)
-        {
-            stack.Push(node);
-        }
-
-        return stack;
-    }
-
-    public bool HasValueAncestor() =>
-        Parent is not null && Parent.AncestorsAndSelf().Any(node => node.IsValue);
-}
-
-internal static class OidTreeBuilder
-{
-    public static OidTreeNode Build(IEnumerable<KeyValuePair<string, MibModule>> modules)
-    {
-        var root = new OidTreeNode(0, null);
-
-        foreach (var moduleEntry in modules)
-        {
-            var moduleName = moduleEntry.Key;
-            var module = moduleEntry.Value;
-            foreach (var oidEntry in module.AllOids)
-            {
-                var name = oidEntry.Key;
-                var ident = oidEntry.Value;
-                module.AllItems.TryGetValue(ident, out var item);
-                Insert(root, ident, name, moduleName, item);
-            }
-
-            // Table columns are removed from MibModule.Items, but they still belong in the tree.
-            foreach (var itemEntry in module.AllItems)
-            {
-                var ident = itemEntry.Key;
-                var item = itemEntry.Value;
-                Insert(root, ident, item.Ident.Name, moduleName, item);
-            }
-        }
-
-        return root;
-    }
-
-    private static void Insert(
-        OidTreeNode root,
-        MibItemIdent ident,
-        string? finalName,
-        string moduleName,
-        MibItem? item)
-    {
-        var namesOffset = ident.Oid.Length - ident.OidNames.Length;
-        var node = root;
-
-        for (var index = 0; index < ident.Oid.Length; index++)
-        {
-            var arc = ident.Oid[index];
-            if (!node.Children.TryGetValue(arc, out var child))
-            {
-                child = new OidTreeNode(arc, node);
-                node.Children.Add(arc, child);
-            }
-
-            node = child;
-            var rawName = index >= namesOffset ? ident.OidNames[index - namesOffset] : null;
-            if (index == ident.Oid.Length - 1 && !string.IsNullOrWhiteSpace(finalName))
-            {
-                rawName = finalName;
-            }
-
-            node.Define(rawName, moduleName, index == ident.Oid.Length - 1 ? item : null);
-        }
-    }
+    public static bool HasValueAncestor(this MibTreeNode node) =>
+        node.Parent is not null && node.Parent.AncestorsAndSelf().Any(ancestor => ancestor.IsValue);
 }
 
 internal static class OidTreeNaming
@@ -146,10 +47,10 @@ internal static class OidTreeNaming
         "void", "volatile", "while"
     ];
 
-    public static string NamespaceFor(OidTreeNode node) =>
+    public static string NamespaceFor(MibTreeNode node) =>
         string.Join(".", node.AncestorsAndSelf().Skip(1).Select(NamespaceSegment).Prepend("Snmp"));
 
-    public static string NamespaceSegment(OidTreeNode node)
+    public static string NamespaceSegment(MibTreeNode node)
     {
         if (node is { Item: MibModuleInfo, ModuleName: not null })
         {
@@ -159,15 +60,15 @@ internal static class OidTreeNaming
         var oid = string.Join(".", node.AncestorsAndSelf().Skip(1).Select(x => x.Arc));
         return CanonicalArcs.TryGetValue(oid, out var canonical)
             ? canonical
-            : FormatIdentifier(TrimModulePrefix(node.RawName, node.ModuleName) ?? $"Arc{node.Arc}");
+            : FormatIdentifier(TrimModulePrefix(node.Name, node.ModuleName) ?? $"Arc{node.Arc}");
     }
 
-    public static string TypeName(OidTreeNode node)
+    public static string TypeName(MibTreeNode node)
     {
         var oid = string.Join(".", node.AncestorsAndSelf().Skip(1).Select(x => x.Arc));
         return CanonicalArcs.TryGetValue(oid, out var canonical)
             ? canonical
-            : FormatIdentifier(TrimModulePrefix(node.RawName, node.ModuleName) ?? $"Arc{node.Arc}");
+            : FormatIdentifier(TrimModulePrefix(node.Name, node.ModuleName) ?? $"Arc{node.Arc}");
     }
 
     public static string ModuleName(string moduleName)

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using Parlot;
 using Parlot.Fluent;
@@ -58,13 +59,34 @@ public static class MibParser
     }
 
 
+    /// <summary>Parses the MIB module in the file at <paramref name="path"/> into an AST.</summary>
+    public static ModuleDefinition ParseAstFile(string path) =>
+        ParseAst(File.ReadAllText(path), Path.GetFileNameWithoutExtension(path));
+
+    /// <summary>
+    /// Resolves a set of module ASTs (for example source-generated ones combined with MIBs loaded at runtime)
+    /// into <see cref="MibModule"/>s. Modules are keyed by their identifier; when several ASTs share an
+    /// identifier the last one wins, which allows runtime-loaded modules to replace earlier ones.
+    /// </summary>
+    public static Dictionary<string, MibModule> ParseModules(IEnumerable<ModuleDefinition> asts)
+    {
+        var byName = new Dictionary<string, ModuleDefinition>();
+        foreach (var ast in asts)
+        {
+            byName[ast.Identifier.ToString()] = ast;
+        }
+
+        return ParseModules(byName);
+    }
+
     public static Dictionary<string, MibModule> ParseModules(
         IReadOnlyDictionary<string, ModuleDefinition> asts
     )
     {
+        // Builtin modules don't need to be ordered, unless they are overridden by a supplied module
         var orderedAsts = TopologicalSort(
             asts,
-            mod => mod.Dependencies.Where(dep => !BuiltinMib.All.ContainsKey(dep))
+            mod => mod.Dependencies.Where(dep => !BuiltinMib.All.ContainsKey(dep) || asts.ContainsKey(dep))
         );
 
         var cache = BuiltinMib.All.ToDictionary(x => x.Key, x => x.Value);

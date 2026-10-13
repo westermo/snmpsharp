@@ -278,7 +278,7 @@ internal sealed class TextualConventionNames
 }
 
 /// <summary>Maps MIB objects onto the generated C# types that expose their values.</summary>
-internal sealed class ValueTypeResolver(OidTreeNode root, Compilation compilation, TextualConventionNames tcNames)
+internal sealed class ValueTypeResolver(MibTreeNode root, Compilation compilation, TextualConventionNames tcNames)
 {
     public ValueTypeInfo Resolve(MibLeaf leaf)
     {
@@ -286,7 +286,7 @@ internal sealed class ValueTypeResolver(OidTreeNode root, Compilation compilatio
         return Resolve(node, node?.Item as MibLeaf ?? leaf);
     }
 
-    public ValueTypeInfo Resolve(OidTreeNode? node, MibLeaf leaf)
+    public ValueTypeInfo Resolve(MibTreeNode? node, MibLeaf leaf)
     {
         var type = leaf.Type;
         var kind = ValueTypes.KindOf(type);
@@ -300,7 +300,7 @@ internal sealed class ValueTypeResolver(OidTreeNode root, Compilation compilatio
             : new ValueTypeInfo(kind, type.AsAsnType(), csType, ValueTypes.BitsOctets(type));
     }
 
-    private string? InlineEnumType(OidTreeNode? node, MibLeaf leaf)
+    private string? InlineEnumType(MibTreeNode? node, MibLeaf leaf)
     {
         if (node is null) return null;
 
@@ -336,7 +336,7 @@ internal sealed class ValueTypeResolver(OidTreeNode root, Compilation compilatio
         return $"global::{owner}.{enumName}";
     }
 
-    private OidTreeNode? Find(MibItemIdent ident)
+    private MibTreeNode? Find(MibItemIdent ident)
     {
         var node = root;
         foreach (var arc in ident.Oid)

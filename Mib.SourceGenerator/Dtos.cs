@@ -13,19 +13,20 @@ namespace SnmpSharpNet.Mib.SourceGenerator;
 public record struct GenMibDefinition(
     string Name, Location Location,
     Result<ModuleDefinition> Module,
-    IReadOnlyList<Diagnostic>? Warnings
+    IReadOnlyList<Diagnostic>? Warnings,
+    string Source
 ) {
     public static GenMibDefinition FromAdditionalText(AdditionalText text, CancellationToken ct)
     {
         var name = Path.GetFileNameWithoutExtension(text.Path);
         var loc = Location.FromAdditionalText(text);
-        var source = text.GetText(ct)!;
+        var source = text.GetText(ct)!.ToString();
 
         Result<ModuleDefinition> module;
         List<Diagnostic>? warnings = null;
         try
         {
-            var mod = MibParser.ParseAst(source.ToString(), name);
+            var mod = MibParser.ParseAst(source, name);
             if (mod.Identifier != name)
             {
                 // The filename doesn't match the module identifier.
@@ -42,7 +43,7 @@ public record struct GenMibDefinition(
         {
             module = Diagnostic.Create(Diagnostics.ParseError, loc.WithPosition(e.Position), e.Message);
         }
-        return new GenMibDefinition(name, loc, module, warnings);
+        return new GenMibDefinition(name, loc, module, warnings, source);
     }
 
     public readonly bool CollectError(List<Diagnostic> errors)
@@ -60,6 +61,34 @@ public record struct GenMibDefinition(
 }
 
 
+
+public sealed class EquatableArray<T>(T[] items) : IEquatable<EquatableArray<T>>, IReadOnlyList<T>
+    where T : IEquatable<T>
+{
+    private readonly T[] items = items;
+
+    public int Count => items.Length;
+    public T this[int index] => items[index];
+
+    public bool Equals(EquatableArray<T>? other) =>
+        other is not null && (ReferenceEquals(this, other) || items.SequenceEqual(other.items));
+
+    public override bool Equals(object? obj) => Equals(obj as EquatableArray<T>);
+
+    public override int GetHashCode()
+    {
+        unchecked
+        {
+            int hash = 17;
+            foreach (var item in items)
+                hash = hash * 31 + item.GetHashCode();
+            return hash;
+        }
+    }
+
+    public IEnumerator<T> GetEnumerator() => ((IEnumerable<T>)items).GetEnumerator();
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => items.GetEnumerator();
+}
 
 public class ValuedDictionary<T, U> : Dictionary<T, U>, IEquatable<ValuedDictionary<T, U>>
     where T : IEquatable<T>

@@ -19,6 +19,7 @@
 
     <ItemGroup>
         <AdditionalFiles Include="../mibs/*.mib" Link="$(Filename)$(Extension)"/>
+        <None Include="../mibs/SNMPv2-*.mib" Link="mibs/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest"/>
     </ItemGroup>
 
     <ItemGroup>
