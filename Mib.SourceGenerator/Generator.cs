@@ -7,13 +7,22 @@ using Microsoft.CodeAnalysis;
 
 namespace SnmpSharpNet.Mib.SourceGenerator;
 
-using AllMibs = (ValuedDictionary<string, MibModule>?, ImmutableArray<Diagnostic>?, EquatableArray<string>?);
+using AllMibs = (ValuedDictionary<string, MibModule>?, ImmutableArray<Diagnostic>?, ValuedDictionary<string, string>?, EquatableArray<string>?);
 
 [Generator]
 public sealed class SnmpGenerator : IIncrementalGenerator
 {
+    /// <summary>MSBuild property that controls embedding of MIB sources (and runtime AST access).</summary>
+    public const string EmbedMibSourcesProperty = "SnmpSharpNetEmbedMibSources";
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
+        var embedSources = context.AnalyzerConfigOptionsProvider
+            .Select(static (options, _) => IsEnabled(
+                options.GlobalOptions.TryGetValue($"build_property.{EmbedMibSourcesProperty}", out var value)
+                    ? value
+                    : null));
+
         var allMibs = context.AdditionalTextsProvider
             .Where(text => text.Path.EndsWith(".mib", StringComparison.OrdinalIgnoreCase))
             .Collect()
@@ -61,46 +70,30 @@ public sealed class SnmpGenerator : IIncrementalGenerator
 
                 if (errors.Count > 0)
                 {
-                    return (null, [.. warnings, .. errors], null);
+                    return (null, [.. warnings, .. errors], null, null);
                 }
+
+                var sources = new ValuedDictionary<string, string>(
+                    asts.ToDictionary(x => x.Key, x => x.Value.Source));
 
                 // Builtin modules that are imported but not supplied as files are emitted from BuiltinMib.
                 // Their own dependencies are included transitively so their parent arcs are always named.
-                var builtinSet = new HashSet<string>(StringComparer.Ordinal);
-                var pending = new Queue<string>(asts.Values.SelectMany(x => x.Module.Value.Dependencies));
-                while (pending.Count > 0)
-                {
-                    var dep = pending.Dequeue();
-                    if (asts.ContainsKey(dep) || !BuiltinMib.All.TryGetValue(dep, out var exports)
-                                              || !builtinSet.Add(dep))
-                    {
-                        continue;
-                    }
-
-                    if (exports is BuiltinMib builtin)
-                    {
-                        foreach (var transitive in builtin.Dependencies)
-                        {
-                            pending.Enqueue(transitive);
-                        }
-                    }
-                }
-
-                var builtins = builtinSet
-                    .OrderBy(dep => dep, StringComparer.Ordinal)
-                    .ToArray();
+                var builtins = MibTree.GetBuiltinDependencies(
+                    asts.ToDictionary(x => x.Key, x => x.Value.Module.Value));
 
                 // Return warnings together with the successful result so they can be emitted
                 var allDiagnostics = warnings.ToImmutableArray();
                 return (resolvedModules!,
                     allDiagnostics.Length > 0 ? allDiagnostics : null,
-                    new EquatableArray<string>(builtins));
+                    sources,
+                    new EquatableArray<string>([.. builtins]));
             });
 
-        context.RegisterSourceOutput(context.CompilationProvider.Combine(allMibs), (ctx, x) =>
+        context.RegisterSourceOutput(context.CompilationProvider.Combine(allMibs).Combine(embedSources), (ctx, x) =>
         {
-            var compilation = x.Left;
-            var mibs = x.Right;
+            var compilation = x.Left.Left;
+            var mibs = x.Left.Right;
+            var embed = x.Right;
 
             if (mibs.Item2 is {} diagnostics)
             {
@@ -112,11 +105,22 @@ public sealed class SnmpGenerator : IIncrementalGenerator
                 if (mibs.Item1 is null) { return; }
             }
 
-            var tree = OidTreeBuilder.Build(mibs.Item1!, mibs.Item3 ?? new EquatableArray<string>([]));
+            var tree = MibTree.Build(mibs.Item1!, mibs.Item4);
             foreach (var source in TreeTemplating.Generate(tree, compilation))
             {
                 ctx.AddSource(source.HintName, source.Source);
             }
+
+            if (embed && mibs.Item3 is { Count: > 0 } mibSources && MibModuleRegistryTemplating.CanEmit(compilation))
+            {
+                var registry = MibModuleRegistryTemplating.Generate(mibSources);
+                ctx.AddSource(registry.HintName, registry.Source);
+            }
         });
     }
+
+    internal static bool IsEnabled(string? value) =>
+        value is null
+        || string.IsNullOrWhiteSpace(value)
+        || !(value.Trim().Equals("false", StringComparison.OrdinalIgnoreCase) || value.Trim() == "0");
 }

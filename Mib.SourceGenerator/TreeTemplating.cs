@@ -14,13 +14,13 @@ internal sealed class GeneratedSource(string hintName, string source)
 
 internal static class TreeTemplating
 {
-    public static IEnumerable<GeneratedSource> Generate(OidTreeNode root, Compilation compilation)
+    public static IEnumerable<GeneratedSource> Generate(MibTreeNode root, Compilation compilation)
     {
         var emitted = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var node in Descendants(root).Where(node => !node.HasValueAncestor()))
         {
-            if (node.IsNamespace)
+            if (node.IsNamespace())
             {
                 var @namespace = OidTreeNaming.NamespaceFor(node);
                 var typeName = $"{@namespace}.Id";
@@ -49,17 +49,17 @@ internal static class TreeTemplating
         }
     }
 
-    private static string NodeName(OidTreeNode node)
+    private static string NodeName(MibTreeNode node)
     {
-        return node.RawName ?? node.Arc.ToString();
+        return node.Name ?? node.Arc.ToString();
     }
 
-    private static IEnumerable<OidTreeNode> Descendants(OidTreeNode node) =>
+    private static IEnumerable<MibTreeNode> Descendants(MibTreeNode node) =>
         node.Children.Values
             .OrderBy(child => child.Arc)
             .SelectMany(child => new[] { child }.Concat(Descendants(child)));
 
-    private static IEnumerable<string> BranchIdentifier(OidTreeNode node, string name, string @namespace)
+    private static IEnumerable<string> BranchIdentifier(MibTreeNode node, string name, string @namespace)
     {
         foreach (var comment in Templating.DocComment(DotForm(node)).Indent().Indent())
             yield return comment;
@@ -77,7 +77,7 @@ internal static class TreeTemplating
         yield return "using System.CodeDom.Compiler;";
     }
 
-    private static string[] NamespaceConstants(string @namespace, OidTreeNode node, string name) =>
+    private static string[] NamespaceConstants(string @namespace, MibTreeNode node, string name) =>
     [
         .. CommonUsings(),
         "",
@@ -93,7 +93,7 @@ internal static class TreeTemplating
         "}"
     ];
 
-    private static string[] ValueType(string @namespace, string name, OidTreeNode node)
+    private static string[] ValueType(string @namespace, string name, MibTreeNode node)
     {
         return node.Item switch
         {
@@ -104,7 +104,7 @@ internal static class TreeTemplating
         };
     }
 
-    private static string[] LeafType(string @namespace, string name, OidTreeNode node, MibLeaf leaf)
+    private static string[] LeafType(string @namespace, string name, MibTreeNode node, MibLeaf leaf)
     {
         var oid = DotForm(node);
         var hasTableAncestor = node.AncestorsAndSelf().Any(ancestor => ancestor.Item is MibTable);
@@ -142,12 +142,12 @@ internal static class TreeTemplating
         return [.. lines];
     }
 
-    private static string DotForm(OidTreeNode skip)
+    private static string DotForm(MibTreeNode skip)
     {
         return string.Join(".", skip.AncestorsAndSelf().Skip(1).Select(x => x.Arc));
     }
 
-    private static string[] TableType(string @namespace, string name, OidTreeNode node, MibTable table)
+    private static string[] TableType(string @namespace, string name, MibTreeNode node, MibTable table)
     {
         var oid = DotForm(node);
         List<string> lines =
@@ -249,14 +249,14 @@ internal static class TreeTemplating
     }
 
 
-    private static IEnumerable<string[]> NotificationHelpers(OidTreeNode node)
+    private static IEnumerable<string[]> NotificationHelpers(MibTreeNode node)
     {
         var directDescendants = node.Children.Select(s => s.Value).ToArray();
         var notifications = directDescendants
             .Where(child => child.IsNotification)
             .OrderBy(DotForm, StringComparer.Ordinal)
             .ToArray();
-        var namespaces = directDescendants.Where(child => child.IsNamespace)
+        var namespaces = directDescendants.Where(child => child.IsNamespace())
             .Where(child => Descendants(child).Any(s => s.IsNotification))
             .OrderBy(DotForm, StringComparer.Ordinal)
             .ToArray();
@@ -290,7 +290,7 @@ internal static class TreeTemplating
         ];
     }
 
-    private static IEnumerable<string> NestedNode(OidTreeNode node, string parentOid)
+    private static IEnumerable<string> NestedNode(MibTreeNode node, string parentOid)
     {
         var name = OidTreeNaming.TypeName(node);
         var expression = $"{parentOid} + {node.Arc}u";
@@ -337,7 +337,7 @@ internal static class TreeTemplating
         yield return "}";
     }
 
-    private static string[] NotificationType(string @namespace, string name, OidTreeNode node,
+    private static string[] NotificationType(string @namespace, string name, MibTreeNode node,
         MibNotification notification)
     {
         var oid = DotForm(node);
@@ -469,7 +469,7 @@ internal static class TreeTemplating
         return [.. lines];
     }
 
-    private static MibTable? ContainingTable(OidTreeNode node, MibLeaf leaf)
+    private static MibTable? ContainingTable(MibTreeNode node, MibLeaf leaf)
     {
         var root = node;
         while (root.Parent is not null)
@@ -589,7 +589,7 @@ internal static class TreeTemplating
         return ReservedNotificationMemberNames.Contains(name, StringComparer.Ordinal) ? $"Value{name}" : name;
     }
 
-    private static string OidExpression(OidTreeNode node)
+    private static string OidExpression(MibTreeNode node)
     {
         if (node.Parent?.Parent is null)
         {

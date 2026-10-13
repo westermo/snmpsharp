@@ -13,19 +13,20 @@ namespace SnmpSharpNet.Mib.SourceGenerator;
 public record struct GenMibDefinition(
     string Name, Location Location,
     Result<ModuleDefinition> Module,
-    IReadOnlyList<Diagnostic>? Warnings
+    IReadOnlyList<Diagnostic>? Warnings,
+    string Source
 ) {
     public static GenMibDefinition FromAdditionalText(AdditionalText text, CancellationToken ct)
     {
         var name = Path.GetFileNameWithoutExtension(text.Path);
         var loc = Location.FromAdditionalText(text);
-        var source = text.GetText(ct)!;
+        var source = text.GetText(ct)!.ToString();
 
         Result<ModuleDefinition> module;
         List<Diagnostic>? warnings = null;
         try
         {
-            var mod = MibParser.ParseAst(source.ToString(), name);
+            var mod = MibParser.ParseAst(source, name);
             if (mod.Identifier != name)
             {
                 // The filename doesn't match the module identifier.
@@ -42,7 +43,7 @@ public record struct GenMibDefinition(
         {
             module = Diagnostic.Create(Diagnostics.ParseError, loc.WithPosition(e.Position), e.Message);
         }
-        return new GenMibDefinition(name, loc, module, warnings);
+        return new GenMibDefinition(name, loc, module, warnings, source);
     }
 
     public readonly bool CollectError(List<Diagnostic> errors)
