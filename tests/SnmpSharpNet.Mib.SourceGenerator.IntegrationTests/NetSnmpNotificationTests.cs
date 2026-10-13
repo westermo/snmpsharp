@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using Snmp.Iso.Org.Dod.Internet.Mgmt.Mib2.Interfaces;
 using Snmp.Iso.Org.Dod.Internet.SnmpV2.SnmpModules.SNMPv2.SnmpMIBObjects.SnmpTraps;
 
 namespace SnmpSharpNet.Mib.SourceGenerator.IntegrationTests;
@@ -29,7 +30,7 @@ public class NetSnmpNotificationTests
         await Assert.That(notification.NotificationIndexes[0]).IsEqualTo(99u);
         await Assert.That(notification.Index).IsEqualTo(99u);
         await Assert.That(notification.IfIndex).IsEqualTo(new Integer32(99));
-        await Assert.That(notification.IfAdminStatus).IsEqualTo(new Integer32(1));
-        await Assert.That(notification.IfOperStatus).IsEqualTo(new Integer32(1));
+        await Assert.That(notification.IfAdminStatus).IsEqualTo(IfTableEntry.AdminStatusValues.Up);
+        await Assert.That(notification.IfOperStatus).IsEqualTo(IfTableEntry.OperStatusValues.Up);
     }
 }

@@ -106,7 +106,7 @@ public sealed class SnmpGenerator : IIncrementalGenerator
             }
 
             var tree = MibTree.Build(mibs.Item1!, mibs.Item4);
-            foreach (var source in TreeTemplating.Generate(tree, compilation))
+            foreach (var source in TreeTemplating.Generate(tree, mibs.Item1!.Select(module => module.Value), compilation))
             {
                 ctx.AddSource(source.HintName, source.Source);
             }

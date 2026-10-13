@@ -1,0 +1,211 @@
+ENUM-TEST-MIB DEFINITIONS ::= BEGIN
+
+IMPORTS
+    OBJECT-TYPE, NOTIFICATION-TYPE, Integer32
+        FROM SNMPv2-SMI
+    TEXTUAL-CONVENTION, TruthValue
+        FROM SNMPv2-TC;
+
+enumTest OBJECT IDENTIFIER ::= { iso 9997 }
+enumTestNotifications OBJECT IDENTIFIER ::= { enumTest 0 }
+enumTestScalars OBJECT IDENTIFIER ::= { enumTest 1 }
+
+EnumTestColor ::= TEXTUAL-CONVENTION
+    STATUS      current
+    DESCRIPTION "A colour."
+    SYNTAX      INTEGER { red(1), green(2), blue-green(3) }
+
+EnumTestFeatures ::= TEXTUAL-CONVENTION
+    STATUS      current
+    DESCRIPTION "A set of features."
+    SYNTAX      BITS { alpha(0), beta(1), gamma-ray(9) }
+
+EnumTestPercent ::= TEXTUAL-CONVENTION
+    STATUS      current
+    DESCRIPTION "A percentage."
+    SYNTAX      Integer32 (0..100)
+
+EnumTest-Shade ::= TEXTUAL-CONVENTION
+    STATUS      current
+    DESCRIPTION "A shade whose name collides with EnumTestShade after normalization."
+    SYNTAX      INTEGER { light(1), dark(2) }
+
+EnumTestShade ::= TEXTUAL-CONVENTION
+    STATUS      current
+    DESCRIPTION "A shade whose name collides with EnumTest-Shade after normalization."
+    SYNTAX      INTEGER { dim(5), bright(6) }
+
+enumTestMode OBJECT-TYPE
+    SYNTAX      INTEGER { off(0), on(1), auto-detect(2), reserved(-2) }
+    MAX-ACCESS  read-write
+    STATUS      current
+    DESCRIPTION "Inline enumeration with a hyphenated label and a negative value."
+    DEFVAL      { on }
+    ::= { enumTestScalars 1 }
+
+enumTestCollision OBJECT-TYPE
+    SYNTAX      INTEGER { foo-bar(1), fooBar(2) }
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "Labels that format to the same identifier."
+    ::= { enumTestScalars 2 }
+
+enumTestColor OBJECT-TYPE
+    SYNTAX      EnumTestColor
+    MAX-ACCESS  read-write
+    STATUS      current
+    DESCRIPTION "Enumeration through a textual convention."
+    DEFVAL      { green }
+    ::= { enumTestScalars 3 }
+
+enumTestFlags OBJECT-TYPE
+    SYNTAX      BITS { first(0), second(1), ninth(9) }
+    MAX-ACCESS  read-write
+    STATUS      current
+    DESCRIPTION "Inline BITS."
+    DEFVAL      { { first, ninth } }
+    ::= { enumTestScalars 4 }
+
+enumTestWideBits OBJECT-TYPE
+    SYNTAX      BITS { low(0), high(70) }
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "BITS with a named bit beyond 63 stays an OctetString."
+    ::= { enumTestScalars 5 }
+
+enumTestFeatures OBJECT-TYPE
+    SYNTAX      EnumTestFeatures
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "BITS through a textual convention."
+    ::= { enumTestScalars 6 }
+
+enumTestEnabled OBJECT-TYPE
+    SYNTAX      TruthValue
+    MAX-ACCESS  read-write
+    STATUS      current
+    DESCRIPTION "Builtin SNMPv2-TC enumeration."
+    ::= { enumTestScalars 7 }
+
+enumTestRange OBJECT-TYPE
+    SYNTAX      Integer32 (-5..-1 | 1..10)
+    MAX-ACCESS  read-write
+    STATUS      current
+    DESCRIPTION "Multi-range value refinement."
+    ::= { enumTestScalars 8 }
+
+enumTestName OBJECT-TYPE
+    SYNTAX      OCTET STRING (SIZE (0 | 4..8))
+    MAX-ACCESS  read-write
+    STATUS      current
+    DESCRIPTION "Multi-range size refinement."
+    ::= { enumTestScalars 9 }
+
+enumTestPercent OBJECT-TYPE
+    SYNTAX      EnumTestPercent
+    MAX-ACCESS  read-write
+    STATUS      current
+    DESCRIPTION "Range refinement through a textual convention."
+    ::= { enumTestScalars 10 }
+
+enumTestValues OBJECT-TYPE
+    SYNTAX      INTEGER { one(1), two(2) }
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "Leaf whose class name clashes with the nested enum name."
+    ::= { enumTestScalars 11 }
+
+enumTestShadeHyphen OBJECT-TYPE
+    SYNTAX      EnumTest-Shade
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "Leaf using EnumTest-Shade."
+    ::= { enumTestScalars 12 }
+
+enumTestShadePlain OBJECT-TYPE
+    SYNTAX      EnumTestShade
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "Leaf using EnumTestShade."
+    ::= { enumTestScalars 13 }
+
+enumTestNoneBits OBJECT-TYPE
+    SYNTAX      BITS { none(3), other(4) }
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "BITS with a named bit that collides with the synthetic None member."
+    ::= { enumTestScalars 14 }
+
+enumTestRowTable OBJECT-TYPE
+    SYNTAX      SEQUENCE OF EnumTestRowEntry
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION "Table with enumerated columns."
+    ::= { enumTest 2 }
+
+enumTestRowEntry OBJECT-TYPE
+    SYNTAX      EnumTestRowEntry
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION "A row."
+    INDEX       { enumTestRowIndex }
+    ::= { enumTestRowTable 1 }
+
+EnumTestRowEntry ::= SEQUENCE {
+    enumTestRowIndex        Integer32,
+    enumTestRowState        INTEGER,
+    enumTestRowColor        EnumTestColor,
+    enumTestRowFlags        BITS,
+    enumTestRowLabel        OCTET STRING,
+    enumTestRowNotifyState  INTEGER
+}
+
+enumTestRowIndex OBJECT-TYPE
+    SYNTAX      Integer32 (1..100)
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION "Row index."
+    ::= { enumTestRowEntry 1 }
+
+enumTestRowState OBJECT-TYPE
+    SYNTAX      INTEGER { idle(1), busy-wait(2) }
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "Inline enumerated column."
+    ::= { enumTestRowEntry 2 }
+
+enumTestRowColor OBJECT-TYPE
+    SYNTAX      EnumTestColor
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "Textual convention enumerated column."
+    ::= { enumTestRowEntry 3 }
+
+enumTestRowFlags OBJECT-TYPE
+    SYNTAX      BITS { a(0), b(1) }
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "Inline BITS column."
+    ::= { enumTestRowEntry 4 }
+
+enumTestRowLabel OBJECT-TYPE
+    SYNTAX      OCTET STRING (SIZE (1..16))
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "Size-refined column."
+    ::= { enumTestRowEntry 5 }
+
+enumTestRowNotifyState OBJECT-TYPE
+    SYNTAX      INTEGER { x(1), y(2) }
+    MAX-ACCESS  accessible-for-notify
+    STATUS      current
+    DESCRIPTION "Enumerated column only used in notifications."
+    ::= { enumTestRowEntry 6 }
+
+enumTestEvent NOTIFICATION-TYPE
+    OBJECTS     { enumTestMode, enumTestFeatures, enumTestFlags, enumTestRowState, enumTestRowNotifyState }
+    STATUS      current
+    DESCRIPTION "A notification with enumerated and BITS objects."
+    ::= { enumTestNotifications 1 }
+
+END

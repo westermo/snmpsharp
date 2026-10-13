@@ -119,13 +119,17 @@ public sealed class MibTextualConvention(
     string? displayHint,
     SMIv2Status status,
     string description,
-    string? reference)
+    string? reference,
+    string? module = null)
 {
     public string Name { get; } = name;
     public string? DisplayHint { get; } = displayHint;
     public SMIv2Status Status { get; } = status;
     public string Description { get; } = description;
     public string? Reference { get; } = reference;
+
+    /// <summary>Identifier of the MIB module that defines this textual convention, when known.</summary>
+    public string? Module { get; } = module;
 }
 
 public class MibType(
@@ -168,6 +172,10 @@ public class MibType(
 
         return new MibType(TypeKind.Integer32Enum, values: values);
     }
+
+    /// <summary>Returns a copy of this type that is named by the given textual convention.</summary>
+    public MibType WithTextualConvention(MibTextualConvention textualConvention) =>
+        new(Kind, Refinement, Values, textualConvention.Name, textualConvention);
 
     public static readonly MibType Unsigned32 = new(TypeKind.Unsigned32, Refinement.AllValues);
     public static readonly MibType OctetString = new(TypeKind.OctetString, Refinement.AllSizes);
@@ -272,5 +280,6 @@ public class MibType(
               left.DisplayHint == right.DisplayHint &&
               left.Status == right.Status &&
               left.Description == right.Description &&
-              left.Reference == right.Reference;
+              left.Reference == right.Reference &&
+              left.Module == right.Module;
 }
