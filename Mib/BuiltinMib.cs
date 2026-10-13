@@ -7,6 +7,7 @@ public class BuiltinMib : IMibThatExports
     public Dictionary<MibItemIdent, MibItem> Items { get; } = [];
     public readonly string Name;
     public readonly Dictionary<string, MibType> Types;
+    public IReadOnlyList<string> Dependencies { get; }
 
     private readonly Dictionary<string, MibItemIdent> oidByName = [];
     private readonly HashSet<string> keywords;
@@ -16,10 +17,12 @@ public class BuiltinMib : IMibThatExports
         Dictionary<string, uint[]> oids,
         Dictionary<string, MibType> types,
         HashSet<string> keywords,
-        Dictionary<string, (uint[], MibType)>? leaves = null)
+        Dictionary<string, (uint[], MibType)>? leaves = null,
+        string[]? dependencies = null)
     {
         Name = name;
         Types = types;
+        Dependencies = dependencies ?? [];
         this.keywords = keywords;
 
         foreach (var kvp in oids)
@@ -102,12 +105,17 @@ public class BuiltinMib : IMibThatExports
             ["Opaque"] = MibType.Opaque,
             ["Counter64"] = MibType.Counter64,
             ["ExtUTCTime"] = MibType.OctetString.WithSize(11).WithSize(13),
+            ["ObjectName"] = MibType.ObjectIdentifier,
+            ["NotificationName"] = MibType.ObjectIdentifier,
         },
         [
             "MODULE-IDENTITY",
             "OBJECT-IDENTITY",
             "OBJECT-TYPE",
             "NOTIFICATION-TYPE",
+            "ObjectSyntax",
+            "SimpleSyntax",
+            "ApplicationSyntax",
         ]
     );
 
@@ -120,7 +128,9 @@ public class BuiltinMib : IMibThatExports
             "MODULE-COMPLIANCE",
             "OBJECT-GROUP",
             "NOTIFICATION-GROUP",
-        ]
+            "AGENT-CAPABILITIES",
+        ],
+        dependencies: ["SNMPv2-SMI"]
     );
 
     // RFC 3418 - SNMPv2-MIB
@@ -133,7 +143,8 @@ public class BuiltinMib : IMibThatExports
             ["snmpTraps"] = [1, 3, 6, 1, 6, 3, 1, 1, 5],
         },
         [],
-        []
+        [],
+        dependencies: ["SNMPv2-SMI"]
     );
 
     // RFC 2579 - SNMPv2-TC
@@ -170,10 +181,12 @@ public class BuiltinMib : IMibThatExports
                 .WithNamedValue("readOnly", 5),
             ["TDomain"] = MibType.ObjectIdentifier,
             ["TAddress"] = MibType.OctetString.WithSize(1, 255),
+            ["InstancePointer"] = MibType.ObjectIdentifier,
         },
         [
             "TEXTUAL-CONVENTION",
-        ]
+        ],
+        dependencies: ["SNMPv2-SMI"]
     );
 
     // RFC 2021 - RMON2-MIB
@@ -213,7 +226,8 @@ public class BuiltinMib : IMibThatExports
             ["DataSource"] = MibType.ObjectIdentifier,
             ["ControlString"] = MibType.OctetString,
         },
-        []
+        [],
+        dependencies: ["SNMPv2-SMI"]
     );
 
     public static readonly IReadOnlyDictionary<string, IMibThatExports> All = new Dictionary<string, IMibThatExports>()

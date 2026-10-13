@@ -51,6 +51,18 @@ Snmp.Iso.Org.Dod.Internet.Private.Enterprises.WestermoOid.Common
     .WestermoInterface.WmoInterfaceObjects.IfRefTable.FromValues(values);
 ```
 
+## Builtin modules
+
+The core modules `SNMPv2-SMI`, `SNMPv2-TC`, `SNMPv2-CONF`, `SNMPv2-MIB` and `RMON2-MIB` are built into the generator, so MIBs importing from them work without supplying those files. When one of your MIBs imports from a builtin module, the generator also emits the OID arcs that module defines, even if your MIBs don't use them:
+
+```csharp
+Snmp.Iso.Org.Dod.Internet.Private.Enterprises.Id.Oid; // 1.3.6.1.4.1
+Snmp.Iso.Org.Dod.Internet.Mgmt.Mib2.Transmission.Id.Oid; // 1.3.6.1.2.1.10
+Snmp.Itu.ZeroDotZero.Id.Oid; // 0.0
+```
+
+You can also supply your own copies of these modules as `AdditionalFiles`, for example the standard `SNMPv2-SMI`, `SNMPv2-TC` and `SNMPv2-CONF` files shipped with net-snmp. A supplied file replaces the builtin module of the same name.
+
 ## Generated binding mechanics
 
 Generated table entries preserve the distinction between an SNMP row's identity and the bindings returned for that row:

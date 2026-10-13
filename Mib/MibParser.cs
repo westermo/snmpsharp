@@ -62,9 +62,10 @@ public static class MibParser
         IReadOnlyDictionary<string, ModuleDefinition> asts
     )
     {
+        // Builtin modules don't need to be ordered, unless they are overridden by a supplied module
         var orderedAsts = TopologicalSort(
             asts,
-            mod => mod.Dependencies.Where(dep => !BuiltinMib.All.ContainsKey(dep))
+            mod => mod.Dependencies.Where(dep => !BuiltinMib.All.ContainsKey(dep) || asts.ContainsKey(dep))
         );
 
         var cache = BuiltinMib.All.ToDictionary(x => x.Key, x => x.Value);
