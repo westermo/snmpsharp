@@ -17,6 +17,27 @@ The namespace has been prefixed with `Westermo`.
 [![Docker Image CI](https://github.com/westermo/snmpsharp/actions/workflows/docker-image.yml/badge.svg)](https://github.com/westermo/snmpsharp/actions/workflows/docker-image.yml)
 [![CodeQL](https://github.com/westermo/snmpsharp/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/westermo/snmpsharp/actions/workflows/codeql-analysis.yml)
 
+# Type conversions
+
+The SMI value types convert to and from the corresponding .NET types:
+
+```csharp
+Integer32 i = 42;                  int n = i;
+UInteger32 u = 42u;                uint m = u;          // also Counter32, Gauge32, TimeTicks
+Counter64 c = 42ul;                ulong l = c;
+OctetString s = "public";          string text = s;     // non-printable data yields a hex dump
+OctetString b = new byte[] { 1 };  byte[] bytes = b;
+Oid oid = "1.3.6.1.2.1.1";         string dotted = oid;
+Oid fromIds = new uint[] { 1, 3 }; uint[] ids = oid;    // returns a copy
+IPAddress addr = new IpAddress("10.0.0.1");
+var ip = (IpAddress)IPAddress.Loopback;                 // throws OverflowException for IPv6
+var ticks = (TimeTicks)TimeSpan.FromSeconds(5);         // throws OverflowException if out of range
+```
+
+`Integer32`, `UInteger32` and `Counter64` can also be compared with (`==`, `!=`, and `<`/`>` for unsigned types) and added to/subtracted from their primitive counterparts directly, e.g. `if (counter > 100u)`.
+
+Converting a `string` to `Oid` throws `FormatException`/`OverflowException` for malformed input. Comparing an `OctetString` or `Oid` directly with a string literal still requires an explicit conversion, e.g. `oid == (Oid)"1.3.6"`.
+
 # MIB Source Generator
 
 `SnmpSharpNet.Mib.SourceGenerator` is a Roslyn incremental source generator that reads `.mib` files at compile time and emits a strongly typed, global C# representation of the complete OID tree. No attributes or hand-written partial classes are required.

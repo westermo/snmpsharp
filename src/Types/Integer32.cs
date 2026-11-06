@@ -15,6 +15,7 @@
 // 
 
 using System;
+using System.Runtime.CompilerServices;
 
 namespace SnmpSharpNet;
 
@@ -45,6 +46,7 @@ public class Integer32 : AsnType, IComparable<Integer32>, IComparable<int>, IClo
     /// <param name="val">
     ///     Class value initializer
     /// </param>
+    [OverloadResolutionPriority(1)]
     public Integer32(int val) : this()
     {
         _value = val;
@@ -178,6 +180,16 @@ public class Integer32 : AsnType, IComparable<Integer32>, IComparable<int>, IClo
     }
 
     /// <summary>
+    ///     Implicit casting of Int32 value as Integer32 class
+    /// </summary>
+    /// <param name="value">Int32 value</param>
+    /// <returns>New Integer32 class initialized with the value.</returns>
+    public static implicit operator Integer32(int value)
+    {
+        return new Integer32(value);
+    }
+
+    /// <summary>
     ///     Return class value hash code
     /// </summary>
     /// <returns>Int32 hash of the class stored value</returns>
@@ -237,6 +249,78 @@ public class Integer32 : AsnType, IComparable<Integer32>, IComparable<int>, IClo
     public static bool operator !=(Integer32 first, Integer32 second)
     {
         return !(first == second);
+    }
+
+    /// <summary>Compare class value with an Int32 value. A null reference is never equal to an Int32 value.</summary>
+    /// <param name="first"><see cref="Integer32" /> class value to compare</param>
+    /// <param name="second">Int32 value to compare</param>
+    /// <returns>True if values match, otherwise false</returns>
+    public static bool operator ==(Integer32? first, int second)
+    {
+        return first is not null && first.Value == second;
+    }
+
+    /// <summary>Compare class value with an Int32 value. A null reference is never equal to an Int32 value.</summary>
+    /// <param name="first"><see cref="Integer32" /> class value to compare</param>
+    /// <param name="second">Int32 value to compare</param>
+    /// <returns>True if values do NOT match, otherwise false</returns>
+    public static bool operator !=(Integer32? first, int second)
+    {
+        return !(first == second);
+    }
+
+    /// <summary>Compare Int32 value with a class value. A null reference is never equal to an Int32 value.</summary>
+    /// <param name="first">Int32 value to compare</param>
+    /// <param name="second"><see cref="Integer32" /> class value to compare</param>
+    /// <returns>True if values match, otherwise false</returns>
+    public static bool operator ==(int first, Integer32? second)
+    {
+        return second == first;
+    }
+
+    /// <summary>Compare Int32 value with a class value. A null reference is never equal to an Int32 value.</summary>
+    /// <param name="first">Int32 value to compare</param>
+    /// <param name="second"><see cref="Integer32" /> class value to compare</param>
+    /// <returns>True if values do NOT match, otherwise false</returns>
+    public static bool operator !=(int first, Integer32? second)
+    {
+        return !(second == first);
+    }
+
+    /// <summary>Add an Int32 value to the class value. A null reference is treated as 0.</summary>
+    /// <param name="first">Integer32 object</param>
+    /// <param name="second">Int32 value</param>
+    /// <returns>Sum of the two values as Int32</returns>
+    public static int operator +(Integer32? first, int second)
+    {
+        return (first?.Value ?? 0) + second;
+    }
+
+    /// <summary>Add the class value to an Int32 value. A null reference is treated as 0.</summary>
+    /// <param name="first">Int32 value</param>
+    /// <param name="second">Integer32 object</param>
+    /// <returns>Sum of the two values as Int32</returns>
+    public static int operator +(int first, Integer32? second)
+    {
+        return first + (second?.Value ?? 0);
+    }
+
+    /// <summary>Subtract an Int32 value from the class value. A null reference is treated as 0.</summary>
+    /// <param name="first">Integer32 object</param>
+    /// <param name="second">Int32 value</param>
+    /// <returns>Difference of the two values as Int32</returns>
+    public static int operator -(Integer32? first, int second)
+    {
+        return (first?.Value ?? 0) - second;
+    }
+
+    /// <summary>Subtract the class value from an Int32 value. A null reference is treated as 0.</summary>
+    /// <param name="first">Int32 value</param>
+    /// <param name="second">Integer32 object</param>
+    /// <returns>Difference of the two values as Int32</returns>
+    public static int operator -(int first, Integer32? second)
+    {
+        return first - (second?.Value ?? 0);
     }
 
     /// <summary>

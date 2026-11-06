@@ -15,6 +15,7 @@
 // 
 
 using System;
+using System.Runtime.CompilerServices;
 
 namespace SnmpSharpNet;
 
@@ -57,6 +58,7 @@ public class Counter32 : UInteger32, ICloneable
 
     /// <summary>Constructor.</summary>
     /// <param name="val">UInt32 value</param>
+    [OverloadResolutionPriority(1)]
     public Counter32(uint val) : base(val)
     {
         _asnType = SnmpConstants.SMI_COUNTER32;
@@ -67,6 +69,16 @@ public class Counter32 : UInteger32, ICloneable
     public override object Clone()
     {
         return new Counter32(this);
+    }
+
+    /// <summary>
+    ///     Implicit casting of UInt32 value as Counter32 class
+    /// </summary>
+    /// <param name="value">UInt32 value</param>
+    /// <returns>New Counter32 class initialized with the value.</returns>
+    public static implicit operator Counter32(uint value)
+    {
+        return new Counter32(value);
     }
 
     /// <summary>

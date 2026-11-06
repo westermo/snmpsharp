@@ -19,6 +19,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace SnmpSharpNet;
@@ -50,6 +51,7 @@ public class OctetString : AsnType, ICloneable, IComparable<byte[]>, IComparable
     ///     Constructs the object and sets the data buffer to the byte array values
     /// </summary>
     /// <param name="data">Byte array to copy into the data buffer</param>
+    [OverloadResolutionPriority(1)]
     public OctetString(byte[] data) : this()
     {
         Set(data);
@@ -273,6 +275,7 @@ public class OctetString : AsnType, ICloneable, IComparable<byte[]>, IComparable
     ///     internal <see cref="OctetString" /> buffer is set to null.
     /// </summary>
     /// <param name="data">Byte array to copy data from.</param>
+    [OverloadResolutionPriority(1)]
     public virtual void Set(byte[] data)
     {
         if (data is not { Length: > 0 })
@@ -351,6 +354,7 @@ public class OctetString : AsnType, ICloneable, IComparable<byte[]>, IComparable
     ///     content is set as the class value.
     /// </summary>
     /// <param name="value">Byte array</param>
+    [OverloadResolutionPriority(1)]
     public void Append(byte[] value)
     {
         if (value == null || value.Length == 0)
@@ -509,6 +513,40 @@ public class OctetString : AsnType, ICloneable, IComparable<byte[]>, IComparable
     public static implicit operator byte[](OctetString? oStr)
     {
         return oStr == null ? [] : oStr.GetData();
+    }
+
+    /// <summary>
+    ///     Implicit operator allowing cast of byte[] array to OctetString objects. Data is copied.
+    /// </summary>
+    /// <param name="data">Byte array to cast as OctetString</param>
+    /// <returns>New OctetString with a copy of the data, or null if argument is null</returns>
+    [return: NotNullIfNotNull(nameof(data))]
+    public static implicit operator OctetString?(byte[]? data)
+    {
+        return data is null ? null : new OctetString(data);
+    }
+
+    /// <summary>
+    ///     Implicit operator allowing cast of string to OctetString objects. String is UTF-8 encoded.
+    /// </summary>
+    /// <param name="value">String to cast as OctetString</param>
+    /// <returns>New OctetString with the UTF-8 encoded string, or null if argument is null</returns>
+    [return: NotNullIfNotNull(nameof(value))]
+    public static implicit operator OctetString?(string? value)
+    {
+        return value is null ? null : new OctetString(value);
+    }
+
+    /// <summary>
+    ///     Implicit operator allowing cast of OctetString objects to string. Equivalent to <see cref="ToString" />,
+    ///     meaning values containing non-printable characters are returned as a hex string.
+    /// </summary>
+    /// <param name="oStr">OctetString to cast as string</param>
+    /// <returns>String representation of the OctetString, or null if argument is null</returns>
+    [return: NotNullIfNotNull(nameof(oStr))]
+    public static implicit operator string?(OctetString? oStr)
+    {
+        return oStr?.ToString();
     }
 
     /// <summary>
