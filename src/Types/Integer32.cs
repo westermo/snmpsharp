@@ -15,6 +15,7 @@
 // 
 
 using System;
+using System.Security.Cryptography;
 using System.Runtime.CompilerServices;
 
 namespace SnmpSharpNet;
@@ -203,8 +204,7 @@ public class Integer32 : AsnType, IComparable<Integer32>, IComparable<int>, IClo
     /// </summary>
     public void SetRandom()
     {
-        var rand = new Random();
-        _value = rand.Next();
+        _value = RandomNumberGenerator.GetInt32(int.MaxValue);
     }
 
     /// <summary>

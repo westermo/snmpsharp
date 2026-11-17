@@ -139,7 +139,7 @@ public class AuthenticationSHA224 : IAuthenticationDigest
     /// <summary>
     ///     Return authentication protocol name
     /// </summary>
-    public string Name => "HMAC-SHA256";
+    public string Name => "HMAC-SHA224";
 
     /// <summary>
     ///     Compute hash using authentication protocol.

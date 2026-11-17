@@ -5,6 +5,12 @@ namespace SnmpSharpNet.Tests.AuthenticationTests;
 public class AuthenticationSHA224Tests
 {
     [Test]
+    public async Task NameIdentifiesSha224()
+    {
+        await Assert.That(AuthenticationSHA224.Instance.Name).IsEqualTo("HMAC-SHA224");
+    }
+
+    [Test]
     public async Task PasswordToKeyIsConsistent()
     {
         byte[] knownValue =

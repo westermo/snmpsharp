@@ -15,6 +15,7 @@
 // 
 
 using System;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace SnmpSharpNet;
@@ -195,8 +196,7 @@ public class SnmpV1Packet : SnmpPacket
         {
             case 0:
             {
-                var rand = new Random((int)DateTime.Now.Ticks);
-                Pdu.RequestId = rand.Next();
+                Pdu.RequestId = RandomNumberGenerator.GetInt32(1, int.MaxValue);
                 break;
             }
         }

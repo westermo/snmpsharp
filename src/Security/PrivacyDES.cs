@@ -45,8 +45,7 @@ public class PrivacyDES : IPrivacyProtocol
     /// </summary>
     public PrivacyDES()
     {
-        var random = new Random();
-        _salt = random.Next(1, int.MaxValue);
+        _salt = RandomNumberGenerator.GetInt32(1, int.MaxValue);
     }
 
     /// <summary>

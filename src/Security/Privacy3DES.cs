@@ -48,8 +48,7 @@ public class Privacy3DES : IPrivacyProtocol
     /// </summary>
     public Privacy3DES()
     {
-        var rand = new Random();
-        _salt = rand.Next();
+        _salt = RandomNumberGenerator.GetInt32(1, int.MaxValue);
     }
 
     /// <summary>

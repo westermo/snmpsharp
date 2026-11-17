@@ -44,9 +44,8 @@ public class PrivacyAES : IPrivacyProtocol
         if (keyBytes != 16 && keyBytes != 24 && keyBytes != 32)
             throw new ArgumentOutOfRangeException(nameof(keyBytes), "Valid key sizes are 16, 24 and 32 bytes.");
         _keyBytes = keyBytes;
-        // initialize salt generator
-        var rand = new Random();
-        _salt = Convert.ToInt64(rand.Next(1, int.MaxValue));
+        var salt = RandomNumberGenerator.GetBytes(sizeof(long));
+        _salt = BitConverter.ToInt64(salt) & long.MaxValue;
     }
 
     /// <summary>
