@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using Microsoft.CodeAnalysis;
 
 namespace SnmpSharpNet.Mib.SourceGenerator;
 
@@ -14,13 +13,13 @@ internal sealed class GeneratedSource(string hintName, string source)
 
 internal static class TreeTemplating
 {
-    public static IEnumerable<GeneratedSource> Generate(MibTreeNode root, Compilation compilation) =>
-        Generate(root, [], compilation);
+    public static IEnumerable<GeneratedSource> Generate(MibTreeNode root, ISet<string> existingTypeNames) =>
+        Generate(root, [], existingTypeNames);
 
     public static IEnumerable<GeneratedSource> Generate(
         MibTreeNode root,
         IEnumerable<MibModule> modules,
-        Compilation compilation)
+        ISet<string> existingTypeNames)
     {
         var emitted = new HashSet<string>(StringComparer.Ordinal);
 
@@ -30,14 +29,14 @@ internal static class TreeTemplating
             .Where(ValueTypes.IsTextualConventionEnum)
             .ToList();
         var tcNames = new TextualConventionNames(textualConventions.Select(type => type.TextualConvention!));
-        var resolver = new ValueTypeResolver(root, compilation, tcNames);
+        var resolver = new ValueTypeResolver(root, existingTypeNames, tcNames);
         foreach (var type in textualConventions)
         {
             var tc = type.TextualConvention!;
             var @namespace = ValueTypes.TextualConventionNamespace(tc);
             var name = tcNames.TypeName(tc);
             var typeName = $"{@namespace}.{name}";
-            if (!emitted.Add(typeName) || compilation.GetTypeByMetadataName(typeName) is not null) continue;
+            if (!emitted.Add(typeName) || existingTypeNames.Contains(typeName)) continue;
             yield return new GeneratedSource(
                 HintName(@namespace, name, "TextualConventions"),
                 string.Join("\n", TextualConventionEnum(@namespace, name, type, tc)));
@@ -49,7 +48,7 @@ internal static class TreeTemplating
             {
                 var @namespace = OidTreeNaming.NamespaceFor(node);
                 var typeName = $"{@namespace}.Id";
-                if (emitted.Add(typeName) && compilation.GetTypeByMetadataName(typeName) is null)
+                if (emitted.Add(typeName) && !existingTypeNames.Contains(typeName))
                 {
                     yield return new GeneratedSource(HintName(@namespace, "Id", "Identifiers"),
                         string.Join("\n", NamespaceConstants(@namespace, node, OidTreeNaming.TypeName(node))));
@@ -61,7 +60,7 @@ internal static class TreeTemplating
             var parentNamespace = OidTreeNaming.NamespaceFor(node.Parent!);
             var name = OidTreeNaming.TypeName(node);
             var valueTypeName = $"{parentNamespace}.{name}";
-            if (!emitted.Add(valueTypeName) || compilation.GetTypeByMetadataName(valueTypeName) is not null) continue;
+            if (!emitted.Add(valueTypeName) || existingTypeNames.Contains(valueTypeName)) continue;
             var folder = node.Item switch
             {
                 MibTable => "Tables",
@@ -72,6 +71,47 @@ internal static class TreeTemplating
                 HintName(parentNamespace, name, folder),
                 string.Join("\n", ValueType(parentNamespace, name, node, resolver)));
         }
+    }
+
+    public static EquatableArray<string> GetCompilationTypeNames(
+        MibTreeNode root,
+        IEnumerable<MibModule> modules)
+    {
+        var emitted = new HashSet<string>(StringComparer.Ordinal);
+        var typeNames = new HashSet<string>(StringComparer.Ordinal);
+        var textualConventions = modules
+            .SelectMany(module => module.TextualConventions.Values)
+            .Concat(Descendants(root).Select(node => node.Item).OfType<MibLeaf>().Select(leaf => leaf.Type))
+            .Where(ValueTypes.IsTextualConventionEnum)
+            .ToList();
+        var tcNames = new TextualConventionNames(textualConventions.Select(type => type.TextualConvention!));
+        var resolver = new ValueTypeResolver(root, typeNames, tcNames, typeNames);
+
+        foreach (var type in textualConventions)
+        {
+            var tc = type.TextualConvention!;
+            var typeName = $"{ValueTypes.TextualConventionNamespace(tc)}.{tcNames.TypeName(tc)}";
+            if (emitted.Add(typeName)) typeNames.Add(typeName);
+        }
+
+        foreach (var node in Descendants(root).Where(node => !node.HasValueAncestor()))
+        {
+            if (node.IsNamespace())
+            {
+                var typeName = $"{OidTreeNaming.NamespaceFor(node)}.Id";
+                if (emitted.Add(typeName)) typeNames.Add(typeName);
+                continue;
+            }
+
+            var valueTypeName = $"{OidTreeNaming.NamespaceFor(node.Parent!)}.{OidTreeNaming.TypeName(node)}";
+            if (emitted.Add(valueTypeName)) typeNames.Add(valueTypeName);
+        }
+
+        foreach (var node in Descendants(root))
+            if (node.Item is MibLeaf leaf)
+                resolver.Resolve(node, leaf);
+
+        return new EquatableArray<string>([.. typeNames.OrderBy(name => name, StringComparer.Ordinal)]);
     }
 
     private static string[] TextualConventionEnum(string @namespace, string name, MibType type,
