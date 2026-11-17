@@ -13,6 +13,51 @@ The namespace has been prefixed with `Westermo`.
 # Document
 [see wiki](https://github.com/rqx110/SnmpSharpNet/wiki) 
 
+## Async UDP requests (.NET 11)
+
+UDP requests now use asynchronous socket I/O at their core:
+
+```csharp
+using var target = new UdpTarget(IPAddress.Parse("192.0.2.1"), 161, timeout: 2000, retry: 2);
+var parameters = new AgentParameters(SnmpVersion.Ver2, new OctetString("public"));
+var pdu = Pdu.GetPdu();
+pdu.VbList.Add(new Oid("1.3.6.1.2.1.1.1.0"));
+SnmpPacket reply = await target.RequestAsync(pdu, parameters, cancellationToken);
+```
+
+**Breaking API change:** replace callback-based `RequestAsync(pdu, parameters, callback)` with
+`await RequestAsync(pdu, parameters, cancellationToken)`. `DiscoveryAsync(parameters, cancellationToken)`
+now returns `Task<bool>` and resets/updates the supplied SNMPv3 parameters just like `Discovery`.
+The callback delegates and `AsyncRequestResult` have been removed; send, receive, encode, decode and
+validation failures now propagate as exceptions. SNMPv3 validation failures throw rather than returning null.
+
+`UdpTransport.RequestAsync(peer, port, ReadOnlyMemory<byte>, timeout, retries, cancellationToken)`
+provides the raw datagram API. Synchronous `Request` and `Discovery` remain as blocking wrappers over the
+same implementation. A target allows one transport request at a time; overlapping sync/async requests throw
+`InvalidOperationException`. Do not modify request data, security parameters or target settings during a request.
+
+The timeout covers each send/receive attempt; `retries: 0` sends once. Zero or -1 disables the timeout.
+Exhausting attempts throws `SnmpException` with `ErrorCode == SnmpException.RequestTimedOut`.
+Caller cancellation throws `OperationCanceledException` without retrying, and `Close`/`Dispose` aborts pending
+I/O and rejects future requests with `ObjectDisposedException`. No pending receive is left behind after timeout
+or cancellation. Replies from other IP addresses/ports are ignored within the attempt's timeout unless
+`AgentParameters.DisableReplySourceCheck` is enabled (v1/v2c only). Async requests now validate community and
+request ID using the same rules as synchronous requests.
+
+`SimpleSnmp` also exposes `GetAsync`, `GetNextAsync`, `GetBulkAsync`, `SetAsync` and
+`WalkAsync`; the walk streams bindings as they arrive. String-host constructors defer DNS
+lookup until a request, where it is performed asynchronously. `ResolveAsync` can resolve
+the peer explicitly. `IpAddress.SetAsync` provides asynchronous IPv4 hostname resolution
+for SNMP `IpAddress` values.
+
+`TrapAgent` provides async send methods, implements `IDisposable` and `IAsyncDisposable`,
+and its `IPAddress` overloads support both IPv4 and IPv6 destinations. The static
+`TrapAgent.SendTrapAsync` helper disposes its socket after sending. Existing synchronous
+methods remain blocking wrappers.
+
+SNMP privacy salts are now initialized with cryptographic randomness, and generated
+request IDs no longer use time-seeded `Random` instances.
+
 # Pipeline statuses
 [![Docker Image CI](https://github.com/westermo/snmpsharp/actions/workflows/docker-image.yml/badge.svg)](https://github.com/westermo/snmpsharp/actions/workflows/docker-image.yml)
 [![CodeQL](https://github.com/westermo/snmpsharp/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/westermo/snmpsharp/actions/workflows/codeql-analysis.yml)

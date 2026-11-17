@@ -16,9 +16,12 @@
 // First introduced: 0.5.2
 //
 
+using System;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace SnmpSharpNet;
 
@@ -32,12 +35,14 @@ namespace SnmpSharpNet;
 ///     expect to send a lot of notifications, or a static helper TrapAgent.SendTrap method which will
 ///     construct a new socket for each call.
 /// </remarks>
-public class TrapAgent
+public class TrapAgent : IDisposable, IAsyncDisposable
 {
     /// <summary>
     ///     Internal Socket class
     /// </summary>
     protected readonly Socket _sock;
+    private bool _disposed;
+    private readonly bool _supportsIpv6;
 
     /// <summary>
     ///     Constructor.
@@ -48,17 +53,58 @@ public class TrapAgent
     /// </remarks>
     public TrapAgent()
     {
-        _sock = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-        _sock.Bind(new IPEndPoint(IPAddress.Any, 0));
+        try
+        {
+            var socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Dgram, ProtocolType.Udp);
+            try
+            {
+                socket.DualMode = true;
+                socket.Bind(new IPEndPoint(IPAddress.IPv6Any, 0));
+            }
+            catch
+            {
+                socket.Dispose();
+                throw;
+            }
+
+            _sock = socket;
+            _supportsIpv6 = true;
+        }
+        catch (Exception ex) when (ex is SocketException or PlatformNotSupportedException)
+        {
+            _sock = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            _sock.Bind(new IPEndPoint(IPAddress.Any, 0));
+            _supportsIpv6 = false;
+        }
     }
 
-    /// <summary>
-    ///     Destructor.
-    /// </summary>
-    /// <remarks>Destructors only purpose is to close the Socket used by the class.</remarks>
-    ~TrapAgent()
+    /// <summary>Closes the trap sender socket.</summary>
+    public void Dispose()
     {
-        _sock.Close();
+        if (_disposed) return;
+        _disposed = true;
+        _sock.Dispose();
+        GC.SuppressFinalize(this);
+    }
+
+    /// <inheritdoc />
+    public ValueTask DisposeAsync()
+    {
+        Dispose();
+        return ValueTask.CompletedTask;
+    }
+
+    private async Task SendAsync(byte[] buffer, IPAddress peer, int port, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_supportsIpv6 && peer.AddressFamily == AddressFamily.InterNetworkV6)
+            throw new SocketException((int)SocketError.AddressFamilyNotSupported);
+        var address = peer.AddressFamily == AddressFamily.InterNetwork ? peer.MapToIPv6() : peer;
+        var endpoint = new IPEndPoint(address, port);
+        var sent = await _sock.SendToAsync(buffer.AsMemory(), SocketFlags.None, endpoint, cancellationToken)
+            .ConfigureAwait(false);
+        if (sent != buffer.Length)
+            throw new SocketException((int)SocketError.MessageSize);
     }
 
     /// <summary>
@@ -69,8 +115,24 @@ public class TrapAgent
     /// <param name="port">Manager (receiver) UDP port number</param>
     public void SendV1Trap(SnmpV1TrapPacket packet, IpAddress peer, int port)
     {
-        var outBuffer = packet.Encode();
-        _sock.SendTo(outBuffer, new IPEndPoint((IPAddress)peer, port));
+        SendV1TrapAsync(packet, peer, port).GetAwaiter().GetResult();
+    }
+
+    /// <summary>Sends an SNMP version 1 trap asynchronously.</summary>
+    public Task SendV1TrapAsync(SnmpV1TrapPacket packet, IpAddress peer, int port,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(packet);
+        return SendAsync(packet.Encode(), (IPAddress)peer, port, cancellationToken);
+    }
+
+    /// <summary>Sends an SNMP version 1 trap asynchronously to an IPv4 or IPv6 manager.</summary>
+    public Task SendV1TrapAsync(SnmpV1TrapPacket packet, IPAddress peer, int port,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(packet);
+        ArgumentNullException.ThrowIfNull(peer);
+        return SendAsync(packet.Encode(), peer, port, cancellationToken);
     }
 
     /// <summary>
@@ -89,6 +151,15 @@ public class TrapAgent
         IpAddress senderIpAdress, int genericTrap, int specificTrap, uint senderUpTime,
         VbCollection varList)
     {
+        SendV1TrapAsync(receiver, receiverPort, community, senderSysObjectID, senderIpAdress, genericTrap,
+            specificTrap, senderUpTime, varList).GetAwaiter().GetResult();
+    }
+
+    /// <summary>Constructs and sends an SNMP version 1 trap asynchronously.</summary>
+    public Task SendV1TrapAsync(IpAddress receiver, int receiverPort, string community, Oid senderSysObjectID,
+        IpAddress senderIpAdress, int genericTrap, int specificTrap, uint senderUpTime, VbCollection varList,
+        CancellationToken cancellationToken = default)
+    {
         var packet = new SnmpV1TrapPacket(community)
         {
             Pdu =
@@ -101,7 +172,7 @@ public class TrapAgent
         packet.Pdu.TimeStamp = senderUpTime;
         packet.Pdu.VbList.Add(varList);
         packet.Pdu.Enterprise.Set(senderSysObjectID);
-        SendV1Trap(packet, receiver, receiverPort);
+        return SendV1TrapAsync(packet, receiver, receiverPort, cancellationToken);
     }
 
     /// <summary>
@@ -112,10 +183,28 @@ public class TrapAgent
     /// <param name="port">Manager (receiver) UDP port number</param>
     public void SendV2Trap(SnmpV2Packet packet, IpAddress peer, int port)
     {
+        SendV2TrapAsync(packet, peer, port).GetAwaiter().GetResult();
+    }
+
+    /// <summary>Sends an SNMP version 2 trap asynchronously.</summary>
+    public Task SendV2TrapAsync(SnmpV2Packet packet, IpAddress peer, int port,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(packet);
         if (packet.Pdu.Type != PduType.V2Trap)
             throw new SnmpInvalidPduTypeException("Invalid Pdu type.");
-        var outBuffer = packet.Encode();
-        _sock.SendTo(outBuffer, new IPEndPoint((IPAddress)peer, port));
+        return SendAsync(packet.Encode(), (IPAddress)peer, port, cancellationToken);
+    }
+
+    /// <summary>Sends an SNMP version 2 trap asynchronously to an IPv4 or IPv6 manager.</summary>
+    public Task SendV2TrapAsync(SnmpV2Packet packet, IPAddress peer, int port,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(packet);
+        ArgumentNullException.ThrowIfNull(peer);
+        if (packet.Pdu.Type != PduType.V2Trap)
+            throw new SnmpInvalidPduTypeException("Invalid Pdu type.");
+        return SendAsync(packet.Encode(), peer, port, cancellationToken);
     }
 
     /// <summary>
@@ -130,6 +219,14 @@ public class TrapAgent
     public void SendV2Trap(IpAddress receiver, int receiverPort, string community, uint senderUpTime,
         Oid trapObjectID, VbCollection varList)
     {
+        SendV2TrapAsync(receiver, receiverPort, community, senderUpTime, trapObjectID, varList)
+            .GetAwaiter().GetResult();
+    }
+
+    /// <summary>Constructs and sends an SNMP version 2 trap asynchronously.</summary>
+    public Task SendV2TrapAsync(IpAddress receiver, int receiverPort, string community, uint senderUpTime,
+        Oid trapObjectID, VbCollection varList, CancellationToken cancellationToken = default)
+    {
         var packet = new SnmpV2Packet(community)
         {
             Pdu =
@@ -143,7 +240,7 @@ public class TrapAgent
             }
         };
         packet.Pdu.SetVbList(varList);
-        SendV2Trap(packet, receiver, receiverPort);
+        return SendV2TrapAsync(packet, receiver, receiverPort, cancellationToken);
     }
 
     /// <summary>
@@ -154,10 +251,28 @@ public class TrapAgent
     /// <param name="port">Manager (receiver) UDP port number</param>
     public void SendV3Trap(SnmpV3Packet packet, IpAddress peer, int port)
     {
+        SendV3TrapAsync(packet, peer, port).GetAwaiter().GetResult();
+    }
+
+    /// <summary>Sends an SNMP version 3 trap asynchronously.</summary>
+    public Task SendV3TrapAsync(SnmpV3Packet packet, IpAddress peer, int port,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(packet);
         if (packet.Pdu.Type != PduType.V2Trap)
             throw new SnmpInvalidPduTypeException("Invalid Pdu type.");
-        var outBuffer = packet.Encode();
-        _sock.SendTo(outBuffer, new IPEndPoint((IPAddress)peer, port));
+        return SendAsync(packet.Encode(), (IPAddress)peer, port, cancellationToken);
+    }
+
+    /// <summary>Sends an SNMP version 3 trap asynchronously to an IPv4 or IPv6 manager.</summary>
+    public Task SendV3TrapAsync(SnmpV3Packet packet, IPAddress peer, int port,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(packet);
+        ArgumentNullException.ThrowIfNull(peer);
+        if (packet.Pdu.Type != PduType.V2Trap)
+            throw new SnmpInvalidPduTypeException("Invalid Pdu type.");
+        return SendAsync(packet.Encode(), peer, port, cancellationToken);
     }
 
     /// <summary>
@@ -175,6 +290,15 @@ public class TrapAgent
     public void SendV3Trap(IpAddress receiver, int receiverPort, byte[] engineId, int senderEngineBoots,
         int senderEngineTime, string senderUserName, uint senderUpTime, Oid trapObjectID, VbCollection varList)
     {
+        SendV3TrapAsync(receiver, receiverPort, engineId, senderEngineBoots, senderEngineTime, senderUserName,
+            senderUpTime, trapObjectID, varList).GetAwaiter().GetResult();
+    }
+
+    /// <summary>Constructs and sends an SNMP version 3 noAuthNoPriv trap asynchronously.</summary>
+    public Task SendV3TrapAsync(IpAddress receiver, int receiverPort, byte[] engineId, int senderEngineBoots,
+        int senderEngineTime, string senderUserName, uint senderUpTime, Oid trapObjectID, VbCollection varList,
+        CancellationToken cancellationToken = default)
+    {
         var packet = new SnmpV3Packet
         {
             Pdu =
@@ -189,7 +313,7 @@ public class TrapAgent
         packet.ScopedPdu.TrapSysUpTime.Value = senderUpTime;
         packet.ScopedPdu.VbList.Add(varList);
         packet.MsgFlags.Reportable = false;
-        SendV3Trap(packet, receiver, receiverPort);
+        return SendV3TrapAsync(packet, receiver, receiverPort, cancellationToken);
     }
 
     /// <summary>
@@ -213,6 +337,15 @@ public class TrapAgent
         int senderEngineTime, string senderUserName, uint senderUpTime, Oid trapObjectID, VbCollection varList,
         AuthenticationDigests authDigest, byte[] authSecret)
     {
+        SendV3TrapAsync(receiver, receiverPort, engineId, senderEngineBoots, senderEngineTime, senderUserName,
+            senderUpTime, trapObjectID, varList, authDigest, authSecret).GetAwaiter().GetResult();
+    }
+
+    /// <summary>Constructs and sends an SNMP version 3 authNoPriv trap asynchronously.</summary>
+    public Task SendV3TrapAsync(IpAddress receiver, int receiverPort, byte[] engineId, int senderEngineBoots,
+        int senderEngineTime, string senderUserName, uint senderUpTime, Oid trapObjectID, VbCollection varList,
+        AuthenticationDigests authDigest, byte[] authSecret, CancellationToken cancellationToken = default)
+    {
         var packet = new SnmpV3Packet
         {
             Pdu =
@@ -227,7 +360,7 @@ public class TrapAgent
         packet.ScopedPdu.TrapSysUpTime.Value = senderUpTime;
         packet.ScopedPdu.VbList.Add(varList);
         packet.MsgFlags.Reportable = false;
-        SendV3Trap(packet, receiver, receiverPort);
+        return SendV3TrapAsync(packet, receiver, receiverPort, cancellationToken);
     }
 
     /// <summary>
@@ -256,6 +389,17 @@ public class TrapAgent
         int senderEngineTime, string senderUserName, uint senderUpTime, Oid trapObjectID, VbCollection varList,
         AuthenticationDigests authDigest, byte[] authSecret, PrivacyProtocols privProtocol, byte[] privSecret)
     {
+        SendV3TrapAsync(receiver, receiverPort, engineId, senderEngineBoots, senderEngineTime, senderUserName,
+            senderUpTime, trapObjectID, varList, authDigest, authSecret, privProtocol, privSecret)
+            .GetAwaiter().GetResult();
+    }
+
+    /// <summary>Constructs and sends an SNMP version 3 authPriv trap asynchronously.</summary>
+    public Task SendV3TrapAsync(IpAddress receiver, int receiverPort, byte[] engineId, int senderEngineBoots,
+        int senderEngineTime, string senderUserName, uint senderUpTime, Oid trapObjectID, VbCollection varList,
+        AuthenticationDigests authDigest, byte[] authSecret, PrivacyProtocols privProtocol, byte[] privSecret,
+        CancellationToken cancellationToken = default)
+    {
         var packet = new SnmpV3Packet
         {
             Pdu =
@@ -270,7 +414,7 @@ public class TrapAgent
         packet.ScopedPdu.TrapSysUpTime.Value = senderUpTime;
         packet.ScopedPdu.VbList.Add(varList);
         packet.MsgFlags.Reportable = false;
-        SendV3Trap(packet, receiver, receiverPort);
+        return SendV3TrapAsync(packet, receiver, receiverPort, cancellationToken);
     }
 
     /// <summary>
@@ -288,17 +432,34 @@ public class TrapAgent
     /// <param name="port">Manager (receiver) UDP port number</param>
     public static void SendTrap(SnmpPacket packet, IpAddress peer, int port)
     {
-        var agent = new TrapAgent();
+        SendTrapAsync(packet, peer, port).GetAwaiter().GetResult();
+    }
+
+    /// <summary>Sends an SNMP trap asynchronously.</summary>
+    public static async Task SendTrapAsync(SnmpPacket packet, IpAddress peer, int port,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(peer);
+        await SendTrapAsync(packet, (IPAddress)peer, port, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Sends an SNMP trap asynchronously to an IPv4 or IPv6 manager.</summary>
+    public static async Task SendTrapAsync(SnmpPacket packet, IPAddress peer, int port,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(packet);
+        ArgumentNullException.ThrowIfNull(peer);
+        await using var agent = new TrapAgent();
         switch (packet)
         {
             case SnmpV1TrapPacket trapPacket:
-                agent.SendV1Trap(trapPacket, peer, port);
+                await agent.SendV1TrapAsync(trapPacket, peer, port, cancellationToken).ConfigureAwait(false);
                 break;
             case SnmpV2Packet v2Packet:
-                agent.SendV2Trap(v2Packet, peer, port);
+                await agent.SendV2TrapAsync(v2Packet, peer, port, cancellationToken).ConfigureAwait(false);
                 break;
             case SnmpV3Packet v3Packet:
-                agent.SendV3Trap(v3Packet, peer, port);
+                await agent.SendV3TrapAsync(v3Packet, peer, port, cancellationToken).ConfigureAwait(false);
                 break;
             default:
                 throw new SnmpException("Invalid SNMP packet type.");

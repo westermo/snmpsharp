@@ -20,6 +20,8 @@ using System.Diagnostics.Contracts;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace SnmpSharpNet;
 
@@ -244,34 +246,53 @@ public sealed class IpAddress : OctetString, IComparable
     ///     Class value will be set with the parsed dotted decimal IP address in the parameter or
     ///     if string parameter does not represent an IP address, DNS resolution
     ///     will be performed.
-    ///     Note: DNS resolution is performed using <see cref="System.Net.Dns.GetHostEntry(string)" /> and can result
-    ///     in a longer then expected delay in this function. In applications where responsiveness is
-    ///     important, name resolution should be performed using async methods available and result passed
-    ///     to this method.
+    ///     Synchronously resolves host names. Use <see cref="SetAsync"/> in asynchronous applications.
     /// </remarks>
     /// <param name="value">IP address encoded as a string or host name</param>
     /// <exception cref="ArgumentException">Thrown when DNS resolution of the parameter value has failed.</exception>
     public override void Set(string value)
     {
-        if (!IPAddress.TryParse(value, out var ipa))
-            try
+        SetAsync(value).GetAwaiter().GetResult();
+    }
+
+    /// <summary>Resolves and sets an IP address asynchronously, preferring IPv4 when a host has both families.</summary>
+    /// <param name="value">IP address or host name.</param>
+    /// <param name="cancellationToken">Cancels DNS resolution.</param>
+    public async Task SetAsync(string value, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        if (IPAddress.TryParse(value, out var address))
+        {
+            if (address.AddressFamily != AddressFamily.InterNetwork)
+                throw new ArgumentException("SNMP IpAddress values must be IPv4 addresses.", nameof(value));
+            _data = address.GetAddressBytes();
+            return;
+        }
+
+        IPAddress[] addresses;
+        try
+        {
+            addresses = await Dns.GetHostAddressesAsync(value, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new ArgumentException("Unable to parse or resolve supplied value to an IP address.",
+                nameof(value), ex);
+        }
+
+        foreach (var candidate in addresses)
+            if (candidate.AddressFamily == AddressFamily.InterNetwork)
             {
-                var entry = Dns.GetHostEntry(value);
-                // have to loop through all returned addresses to make sure we pick IPv4 address
-                foreach (var addr in entry.AddressList)
-                    if (addr.AddressFamily == AddressFamily.InterNetwork)
-                    {
-                        _data = addr.GetAddressBytes();
-                        break;
-                    }
+                _data = candidate.GetAddressBytes();
+                return;
             }
-            catch
-            {
-                throw new ArgumentException("Unable to parse or resolve supplied value to an IP address.",
-                    nameof(value));
-            }
-        else
-            _data = ipa.GetAddressBytes();
+
+        throw new ArgumentException("Unable to parse or resolve supplied value to an IP address.",
+            nameof(value));
     }
 
     /// <summary>
