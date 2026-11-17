@@ -7,4 +7,7 @@
         <Version>$(AssemblyVersion)-wmo1</Version>
         <IsAotCompatible>true</IsAotCompatible>
     </PropertyGroup>
+    <PropertyGroup>
+        <Features>runtime-async=on</Features>
+    </PropertyGroup>
 </Project>
