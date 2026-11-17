@@ -26,7 +26,7 @@ namespace SnmpSharpNet;
 ///     32-bit integer representing device uptime in 1/100s of a second time periods.
 /// </remarks>
 [Serializable]
-public class TimeTicks : UInteger32, ICloneable
+public class TimeTicks : UInteger32, ICloneable, ISpanParsable<TimeTicks>
 {
     /// <summary>Constructor</summary>
     public TimeTicks()
@@ -183,6 +183,208 @@ public class TimeTicks : UInteger32, ICloneable
         buf.Append(time * 10).Append("ms");
 
         return buf.ToString();
+    }
+
+    public override string ToString(string? format, IFormatProvider? formatProvider)
+    {
+        ValidateFormat(format);
+        return ToString();
+    }
+
+    public override bool TryFormat(
+        Span<char> destination,
+        out int charsWritten,
+        ReadOnlySpan<char> format,
+        IFormatProvider? provider)
+    {
+        ValidateFormat(format);
+        var time = Value;
+        var written = 0;
+        var days = time / (24u * 3600 * 100);
+        time %= 24u * 3600 * 100;
+        var hours = time / (3600 * 100);
+        time %= 3600 * 100;
+        var minutes = time / 6000;
+        time %= 6000;
+        var seconds = time / 100;
+        var milliseconds = time % 100 * 10;
+
+        if (!AppendValue(days, "d ", destination, ref written, provider)
+            || !AppendValue(hours, "h ", destination, ref written, provider)
+            || !AppendValue(minutes, "m ", destination, ref written, provider)
+            || !AppendValue(seconds, "s ", destination, ref written, provider)
+            || !AppendValue(milliseconds, "ms", destination, ref written, provider))
+        {
+            charsWritten = 0;
+            return false;
+        }
+
+        charsWritten = written;
+        return true;
+    }
+
+    public override bool TryFormat(
+        Span<byte> utf8Destination,
+        out int bytesWritten,
+        ReadOnlySpan<char> format,
+        IFormatProvider? provider)
+    {
+        ValidateFormat(format);
+        var time = Value;
+        var written = 0;
+        var days = time / (24u * 3600 * 100);
+        time %= 24u * 3600 * 100;
+        var hours = time / (3600 * 100);
+        time %= 3600 * 100;
+        var minutes = time / 6000;
+        time %= 6000;
+        var seconds = time / 100;
+        var milliseconds = time % 100 * 10;
+
+        if (!AppendValue(days, "d "u8, utf8Destination, ref written, provider)
+            || !AppendValue(hours, "h "u8, utf8Destination, ref written, provider)
+            || !AppendValue(minutes, "m "u8, utf8Destination, ref written, provider)
+            || !AppendValue(seconds, "s "u8, utf8Destination, ref written, provider)
+            || !AppendValue(milliseconds, "ms"u8, utf8Destination, ref written, provider))
+        {
+            bytesWritten = 0;
+            return false;
+        }
+
+        bytesWritten = written;
+        return true;
+    }
+
+    public new static TimeTicks Parse(string s, IFormatProvider? provider)
+    {
+        ArgumentNullException.ThrowIfNull(s);
+        return Parse(s.AsSpan(), provider);
+    }
+
+    public new static TimeTicks Parse(ReadOnlySpan<char> s, IFormatProvider? provider)
+    {
+        if (!TryParseValue(s, provider, out var value))
+            throw new FormatException("Invalid TimeTicks value.");
+        return new TimeTicks(value);
+    }
+
+    public static bool TryParse(string? s, IFormatProvider? provider, out TimeTicks result)
+    {
+        if (s is not null && TryParseValue(s.AsSpan(), provider, out var value))
+        {
+            result = new TimeTicks(value);
+            return true;
+        }
+
+        result = null!;
+        return false;
+    }
+
+    public static bool TryParse(ReadOnlySpan<char> s, IFormatProvider? provider, out TimeTicks result)
+    {
+        if (TryParseValue(s, provider, out var value))
+        {
+            result = new TimeTicks(value);
+            return true;
+        }
+
+        result = null!;
+        return false;
+    }
+
+    private static bool TryParseValue(ReadOnlySpan<char> value, IFormatProvider? provider, out uint ticks)
+    {
+        if (uint.TryParse(value, provider, out ticks)) return true;
+
+        var remaining = value;
+        if (!TryReadComponent(ref remaining, "d ", provider, out var days)
+            || !TryReadComponent(ref remaining, "h ", provider, out var hours)
+            || !TryReadComponent(ref remaining, "m ", provider, out var minutes)
+            || !TryReadComponent(ref remaining, "s ", provider, out var seconds)
+            || !remaining.EndsWith("ms", StringComparison.Ordinal)
+            || !uint.TryParse(remaining[..^2], provider, out var milliseconds)
+            || hours >= 24
+            || minutes >= 60
+            || seconds >= 60
+            || milliseconds >= 1000
+            || milliseconds % 10 != 0)
+        {
+            ticks = 0;
+            return false;
+        }
+
+        var totalTicks = (ulong)days * (24 * 3600 * 100)
+                         + (ulong)hours * (3600 * 100)
+                         + (ulong)minutes * 6000
+                         + (ulong)seconds * 100
+                         + milliseconds / 10;
+        if (totalTicks > uint.MaxValue)
+        {
+            ticks = 0;
+            return false;
+        }
+
+        ticks = (uint)totalTicks;
+        return true;
+    }
+
+    private static bool TryReadComponent(
+        ref ReadOnlySpan<char> value,
+        ReadOnlySpan<char> suffix,
+        IFormatProvider? provider,
+        out uint component)
+    {
+        var suffixIndex = value.IndexOf(suffix, StringComparison.Ordinal);
+        if (suffixIndex < 0 || !uint.TryParse(value[..suffixIndex], provider, out component))
+        {
+            component = 0;
+            return false;
+        }
+
+        value = value[(suffixIndex + suffix.Length)..];
+        return true;
+    }
+
+    private static bool AppendValue(
+        uint value,
+        ReadOnlySpan<char> suffix,
+        Span<char> destination,
+        ref int written,
+        IFormatProvider? provider)
+    {
+        if (!value.TryFormat(destination[written..], out var numberLength, default, provider)) return false;
+        written += numberLength;
+        if (suffix.Length > destination.Length - written) return false;
+        suffix.CopyTo(destination[written..]);
+        written += suffix.Length;
+        return true;
+    }
+
+    private static bool AppendValue(
+        uint value,
+        ReadOnlySpan<byte> suffix,
+        Span<byte> destination,
+        ref int written,
+        IFormatProvider? provider)
+    {
+        if (!value.TryFormat(destination[written..], out var numberLength, default, provider)) return false;
+        written += numberLength;
+        if (suffix.Length > destination.Length - written) return false;
+        suffix.CopyTo(destination[written..]);
+        written += suffix.Length;
+        return true;
+    }
+
+    private static void ValidateFormat(string? format)
+    {
+        if (format is not (null or "" or "G"))
+            throw new FormatException($"The format '{format}' is not supported.");
+    }
+
+    private static void ValidateFormat(ReadOnlySpan<char> format)
+    {
+        if (!format.IsEmpty && !format.SequenceEqual("G"))
+            throw new FormatException($"The format '{format.ToString()}' is not supported.");
     }
 
     /// <summary>

@@ -71,7 +71,7 @@ namespace SnmpSharpNet;
 ///     Note: internally, IpAddress class holds the value in a byte array, network ordered format.
 /// </remarks>
 [Serializable]
-public sealed class IpAddress : OctetString, IComparable
+public sealed class IpAddress : OctetString, IComparable, ISpanParsable<IpAddress>
 {
     /// <summary>
     ///     Constructs a default object with a
@@ -366,6 +366,128 @@ public sealed class IpAddress : OctetString, IComparable
         buf.Append(data[3]);
 
         return buf.ToString();
+    }
+
+    public override string ToString(string? format, IFormatProvider? formatProvider)
+    {
+        ValidateFormat(format);
+        return ToString();
+    }
+
+    public override bool TryFormat(
+        Span<char> destination,
+        out int charsWritten,
+        ReadOnlySpan<char> format,
+        IFormatProvider? provider)
+    {
+        ValidateFormat(format);
+        charsWritten = 0;
+        if (_data.Length != 4) return false;
+
+        for (var i = 0; i < _data.Length; i++)
+        {
+            if (i > 0)
+            {
+                if (charsWritten == destination.Length)
+                {
+                    charsWritten = 0;
+                    return false;
+                }
+                destination[charsWritten++] = '.';
+            }
+
+            if (!_data[i].TryFormat(destination[charsWritten..], out var written, default, provider))
+            {
+                charsWritten = 0;
+                return false;
+            }
+
+            charsWritten += written;
+        }
+
+        return true;
+    }
+
+    public override bool TryFormat(
+        Span<byte> utf8Destination,
+        out int bytesWritten,
+        ReadOnlySpan<char> format,
+        IFormatProvider? provider)
+    {
+        ValidateFormat(format);
+        bytesWritten = 0;
+        if (_data.Length != 4) return false;
+
+        for (var i = 0; i < _data.Length; i++)
+        {
+            if (i > 0)
+            {
+                if (bytesWritten == utf8Destination.Length)
+                {
+                    bytesWritten = 0;
+                    return false;
+                }
+                utf8Destination[bytesWritten++] = (byte)'.';
+            }
+
+            if (!_data[i].TryFormat(utf8Destination[bytesWritten..], out var written, default, provider))
+            {
+                bytesWritten = 0;
+                return false;
+            }
+
+            bytesWritten += written;
+        }
+
+        return true;
+    }
+
+    public new static IpAddress Parse(string s, IFormatProvider? provider)
+    {
+        ArgumentNullException.ThrowIfNull(s);
+        return Parse(s.AsSpan(), provider);
+    }
+
+    public new static IpAddress Parse(ReadOnlySpan<char> s, IFormatProvider? provider)
+    {
+        if (!TryParse(s, provider, out var result))
+            throw new FormatException("Invalid IPv4 address.");
+        return result;
+    }
+
+    public static bool TryParse(string? s, IFormatProvider? provider, out IpAddress result)
+    {
+        if (s is null)
+        {
+            result = null!;
+            return false;
+        }
+
+        return TryParse(s.AsSpan(), provider, out result);
+    }
+
+    public static bool TryParse(ReadOnlySpan<char> s, IFormatProvider? provider, out IpAddress result)
+    {
+        if (IPAddress.TryParse(s, out var address) && address.AddressFamily == AddressFamily.InterNetwork)
+        {
+            result = new IpAddress(address);
+            return true;
+        }
+
+        result = null!;
+        return false;
+    }
+
+    private static void ValidateFormat(string? format)
+    {
+        if (format is not (null or "" or "G"))
+            throw new FormatException($"The format '{format}' is not supported.");
+    }
+
+    private static void ValidateFormat(ReadOnlySpan<char> format)
+    {
+        if (!format.IsEmpty && !format.SequenceEqual("G"))
+            throw new FormatException($"The format '{format.ToString()}' is not supported.");
     }
 
     /// <summary>

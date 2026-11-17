@@ -29,7 +29,7 @@ namespace SnmpSharpNet;
 ///     class to allow users to perform MAC address specific operations on OctetString values.
 /// </remarks>
 [Serializable]
-public class EthernetAddress : OctetString
+public class EthernetAddress : OctetString, ISpanParsable<EthernetAddress>
 {
     /// <summary>
     ///     Constructor. Initialize the class to 0000.0000.0000
@@ -154,5 +154,146 @@ public class EthernetAddress : OctetString
     {
         return string.Format(CultureInfo.CurrentCulture, "{0:x2}{1:x2}.{2:x2}{3:x2}.{4:x2}{5:x2}", _data[0], _data[1],
             _data[2], _data[3], _data[4], _data[5]);
+    }
+
+    public override string ToString(string? format, IFormatProvider? formatProvider)
+    {
+        ValidateFormat(format);
+        return ToString();
+    }
+
+    public override bool TryFormat(
+        Span<char> destination,
+        out int charsWritten,
+        ReadOnlySpan<char> format,
+        IFormatProvider? provider)
+    {
+        ValidateFormat(format);
+        if (destination.Length < 14 || _data.Length != 6)
+        {
+            charsWritten = 0;
+            return false;
+        }
+
+        const string hex = "0123456789abcdef";
+        var position = 0;
+        for (var i = 0; i < _data.Length; i++)
+        {
+            if (i is 2 or 4) destination[position++] = '.';
+            destination[position++] = hex[_data[i] >> 4];
+            destination[position++] = hex[_data[i] & 0x0f];
+        }
+
+        charsWritten = position;
+        return true;
+    }
+
+    public override bool TryFormat(
+        Span<byte> utf8Destination,
+        out int bytesWritten,
+        ReadOnlySpan<char> format,
+        IFormatProvider? provider)
+    {
+        ValidateFormat(format);
+        if (utf8Destination.Length < 14 || _data.Length != 6)
+        {
+            bytesWritten = 0;
+            return false;
+        }
+
+        const string hex = "0123456789abcdef";
+        var position = 0;
+        for (var i = 0; i < _data.Length; i++)
+        {
+            if (i is 2 or 4) utf8Destination[position++] = (byte)'.';
+            utf8Destination[position++] = (byte)hex[_data[i] >> 4];
+            utf8Destination[position++] = (byte)hex[_data[i] & 0x0f];
+        }
+
+        bytesWritten = position;
+        return true;
+    }
+
+    public new static EthernetAddress Parse(string s, IFormatProvider? provider)
+    {
+        ArgumentNullException.ThrowIfNull(s);
+        return Parse(s.AsSpan(), provider);
+    }
+
+    public new static EthernetAddress Parse(ReadOnlySpan<char> s, IFormatProvider? provider)
+    {
+        if (!TryParse(s, provider, out var result))
+            throw new FormatException("Invalid Ethernet address format.");
+        return result;
+    }
+
+    public static bool TryParse(string? s, IFormatProvider? provider, out EthernetAddress result)
+    {
+        if (s is null)
+        {
+            result = null!;
+            return false;
+        }
+
+        return TryParse(s.AsSpan(), provider, out result);
+    }
+
+    public static bool TryParse(ReadOnlySpan<char> s, IFormatProvider? provider, out EthernetAddress result)
+    {
+        Span<byte> address = stackalloc byte[6];
+        var highNibble = -1;
+        var byteCount = 0;
+
+        foreach (var character in s)
+        {
+            var nibble = HexValue(character);
+            if (nibble < 0) continue;
+
+            if (highNibble < 0)
+            {
+                highNibble = nibble;
+                continue;
+            }
+
+            if (byteCount == address.Length)
+            {
+                result = null!;
+                return false;
+            }
+
+            address[byteCount++] = (byte)((highNibble << 4) | nibble);
+            highNibble = -1;
+        }
+
+        if (byteCount != address.Length || highNibble >= 0)
+        {
+            result = null!;
+            return false;
+        }
+
+        result = new EthernetAddress();
+        for (var i = 0; i < address.Length; i++) result.Set(i, address[i]);
+        return true;
+    }
+
+    private static int HexValue(char character) =>
+        character switch
+        {
+            >= '0' and <= '9' => character - '0',
+            >= 'A' and <= 'F' => character - 'A' + 10,
+            >= 'a' and <= 'f' => character - 'a' + 10,
+            _ => -1
+        };
+
+    private static void ValidateFormat(string? format)
+    {
+        if (format is not (null or "" or "G"))
+            throw new FormatException($"The format '{format}' is not supported.");
+    }
+
+    private static void ValidateFormat(ReadOnlySpan<char> format)
+    {
+        if (!format.IsEmpty && !format.SequenceEqual("G"))
+            throw new FormatException($"The format '{format.ToString()}' is not supported.");
     }
 }

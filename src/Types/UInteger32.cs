@@ -15,6 +15,7 @@
 // 
 
 using System;
+using System.Buffers.Binary;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 
@@ -24,7 +25,8 @@ namespace SnmpSharpNet;
 ///     SMI unsigned 32-bit integer value class.
 /// </summary>
 [Serializable]
-public class UInteger32 : AsnType, IComparable<UInteger32>, IComparable<uint>
+public class UInteger32 : AsnType, IComparable<UInteger32>, IComparable<uint>,
+    ISpanFormattable, IUtf8SpanFormattable, ISpanParsable<UInteger32>
 {
     /// <summary>
     ///     Internal unsigned integer 32-bit value
@@ -140,6 +142,53 @@ public class UInteger32 : AsnType, IComparable<UInteger32>, IComparable<uint>
     public override string ToString()
     {
         return Convert.ToString(_value, CultureInfo.CurrentCulture);
+    }
+
+    public virtual string ToString(string? format, IFormatProvider? formatProvider) =>
+        _value.ToString(format, formatProvider);
+
+    public virtual bool TryFormat(
+        Span<char> destination,
+        out int charsWritten,
+        ReadOnlySpan<char> format,
+        IFormatProvider? provider) =>
+        _value.TryFormat(destination, out charsWritten, format, provider);
+
+    public virtual bool TryFormat(
+        Span<byte> utf8Destination,
+        out int bytesWritten,
+        ReadOnlySpan<char> format,
+        IFormatProvider? provider) =>
+        _value.TryFormat(utf8Destination, out bytesWritten, format, provider);
+
+    public static UInteger32 Parse(string s, IFormatProvider? provider) =>
+        new(uint.Parse(s, provider));
+
+    public static UInteger32 Parse(ReadOnlySpan<char> s, IFormatProvider? provider) =>
+        new(uint.Parse(s, provider));
+
+    public static bool TryParse(string? s, IFormatProvider? provider, out UInteger32 result)
+    {
+        if (uint.TryParse(s, provider, out var value))
+        {
+            result = new UInteger32(value);
+            return true;
+        }
+
+        result = null!;
+        return false;
+    }
+
+    public static bool TryParse(ReadOnlySpan<char> s, IFormatProvider? provider, out UInteger32 result)
+    {
+        if (uint.TryParse(s, provider, out var value))
+        {
+            result = new UInteger32(value);
+            return true;
+        }
+
+        result = null!;
+        return false;
     }
 
     /// <summary>
@@ -422,24 +471,25 @@ public class UInteger32 : AsnType, IComparable<UInteger32>, IComparable<uint>
     private int EncodeValue(Span<byte> buffer)
     {
         Span<byte> b = stackalloc byte[sizeof(uint)];
-        BitConverter.TryWriteBytes(b, _value);
-        var length = 0;
-        for (var i = 3; i >= 0; i--)
-            if (b[i] != 0 || length > 0)
-                buffer[length++] = b[i];
-        switch (length)
+        BinaryPrimitives.WriteUInt32BigEndian(b, _value);
+        var start = 0;
+        while (start < b.Length && b[start] == 0) start++;
+        if (start == b.Length)
         {
-            case > 0 when (buffer[0] & 0x80) != 0:
-                buffer[..length].CopyTo(buffer[1..]);
-                buffer[0] = 0;
-                length++;
-                break;
-            case 0:
-                length++;
-                break;
+            buffer[0] = 0;
+            return 1;
         }
 
-        return length;
+        var value = b[start..];
+        if ((value[0] & 0x80) != 0)
+        {
+            buffer[0] = 0;
+            value.CopyTo(buffer[1..]);
+            return value.Length + 1;
+        }
+
+        value.CopyTo(buffer);
+        return value.Length;
     }
 
     public const int MaxEncodedSize = MaxHeaderSize + sizeof(uint) + 1;
@@ -456,20 +506,13 @@ public class UInteger32 : AsnType, IComparable<UInteger32>, IComparable<uint>
     private int MemberByteLength()
     {
         Span<byte> b = stackalloc byte[sizeof(uint)];
-        BitConverter.TryWriteBytes(b, Value);
-        var length = 0;
-        var zeroth = -1;
-        for (var i = 3; i >= 0; i--)
-        {
-            if (b[i] == 0) continue;
-            zeroth = i;
-            length += i + 1;
-            break;
-        }
+        BinaryPrimitives.WriteUInt32BigEndian(b, Value);
+        var start = 0;
+        while (start < b.Length && b[start] == 0) start++;
+        if (start == b.Length) return 1;
 
-        if ((length > 0 && (b[zeroth] & 0x80) != 0) || length == 0) length++;
-
-        return length;
+        var length = b.Length - start;
+        return (b[start] & 0x80) != 0 ? length + 1 : length;
     }
 
     /// <summary>Decode BER encoded value</summary>

@@ -21,13 +21,15 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.Unicode;
 
 namespace SnmpSharpNet;
 
 /// <summary>ASN.1 OctetString type implementation</summary>
 [Serializable]
 [SuppressMessage("ReSharper", "VirtualMemberCallInConstructor")]
-public class OctetString : AsnType, ICloneable, IComparable<byte[]>, IComparable<OctetString>, IEnumerable<byte>
+public class OctetString : AsnType, ICloneable, IComparable<byte[]>, IComparable<OctetString>, IEnumerable<byte>,
+    ISpanFormattable, IUtf8SpanFormattable, ISpanParsable<OctetString>
 {
     /// <summary>Data buffer</summary>
     protected byte[] _data = [];
@@ -127,16 +129,15 @@ public class OctetString : AsnType, ICloneable, IComparable<byte[]>, IComparable
     ///     Return true if OctetString contains non-printable characters, otherwise return false.
     /// </summary>
     /// <remarks>
-    ///     Values recognized as hex are byte values less then decimal 32 that are not decimal
-    ///     10 or 13 and byte values that are greater then 127 decimal. One exception is byte value 0x00
-    ///     when it is at the end of the byte array is not considered a hex value but a c-like string
-    ///     termination character.
+    ///     Values that aren't valid UTF-8, or contain control bytes other than line feed, carriage
+    ///     return, or a trailing null terminator, are represented as hexadecimal text.
     /// </remarks>
     public bool IsHex
     {
         get
         {
-            var isHex = false;
+            if (!Utf8.IsValid(_data)) return true;
+
             for (var i = 0; i < _data.Length; i++)
             {
                 var b = _data[i];
@@ -144,16 +145,13 @@ public class OctetString : AsnType, ICloneable, IComparable<byte[]>, IComparable
                 {
                     case < 32:
                     {
-                        if (b != 10 && b != 13 && !(b == 0x00 && _data.Length - 1 == i)) isHex = true;
+                        if (b != 10 && b != 13 && !(b == 0x00 && _data.Length - 1 == i)) return true;
                         break;
                     }
-                    case > 127:
-                        isHex = true;
-                        break;
                 }
             }
 
-            return isHex;
+            return false;
         }
     }
 
@@ -409,6 +407,137 @@ public class OctetString : AsnType, ICloneable, IComparable<byte[]>, IComparable
         };
 
         return rs;
+    }
+
+    public virtual string ToString(string? format, IFormatProvider? formatProvider)
+    {
+        ValidateFormat(format);
+        return ToString();
+    }
+
+    public virtual bool TryFormat(
+        Span<char> destination,
+        out int charsWritten,
+        ReadOnlySpan<char> format,
+        IFormatProvider? provider)
+    {
+        ValidateFormat(format);
+        if (IsHex)
+        {
+            var requiredLength = _data.Length == 0 ? 0 : (long)_data.Length * 3 - 1;
+            if (destination.Length < requiredLength)
+            {
+                charsWritten = 0;
+                return false;
+            }
+
+            const string hex = "0123456789ABCDEF";
+            var position = 0;
+            for (var i = 0; i < _data.Length; i++)
+            {
+                if (i > 0) destination[position++] = ' ';
+                destination[position++] = hex[_data[i] >> 4];
+                destination[position++] = hex[_data[i] & 0x0f];
+            }
+
+            charsWritten = position;
+            return true;
+        }
+
+        var charCount = Encoding.UTF8.GetCharCount(_data);
+        if (destination.Length < charCount)
+        {
+            charsWritten = 0;
+            return false;
+        }
+
+        charsWritten = Encoding.UTF8.GetChars(_data, destination);
+        return true;
+    }
+
+    public virtual bool TryFormat(
+        Span<byte> utf8Destination,
+        out int bytesWritten,
+        ReadOnlySpan<char> format,
+        IFormatProvider? provider)
+    {
+        ValidateFormat(format);
+        if (IsHex)
+        {
+            var requiredLength = _data.Length == 0 ? 0 : (long)_data.Length * 3 - 1;
+            if (utf8Destination.Length < requiredLength)
+            {
+                bytesWritten = 0;
+                return false;
+            }
+
+            const string hex = "0123456789ABCDEF";
+            var position = 0;
+            for (var i = 0; i < _data.Length; i++)
+            {
+                if (i > 0) utf8Destination[position++] = (byte)' ';
+                utf8Destination[position++] = (byte)hex[_data[i] >> 4];
+                utf8Destination[position++] = (byte)hex[_data[i] & 0x0f];
+            }
+
+            bytesWritten = position;
+            return true;
+        }
+
+        if (utf8Destination.Length < _data.Length)
+        {
+            bytesWritten = 0;
+            return false;
+        }
+
+        _data.AsSpan().CopyTo(utf8Destination);
+        bytesWritten = _data.Length;
+        return true;
+    }
+
+    public static OctetString Parse(string s, IFormatProvider? provider)
+    {
+        ArgumentNullException.ThrowIfNull(s);
+        return new OctetString(s);
+    }
+
+    public static OctetString Parse(ReadOnlySpan<char> s, IFormatProvider? provider)
+    {
+        var bytes = new byte[Encoding.UTF8.GetByteCount(s)];
+        Encoding.UTF8.GetBytes(s, bytes);
+        return new OctetString(bytes, useReference: true);
+    }
+
+    public static bool TryParse(string? s, IFormatProvider? provider, out OctetString result)
+    {
+        if (s is null)
+        {
+            result = null!;
+            return false;
+        }
+
+        result = new OctetString(s);
+        return true;
+    }
+
+    public static bool TryParse(ReadOnlySpan<char> s, IFormatProvider? provider, out OctetString result)
+    {
+        var bytes = new byte[Encoding.UTF8.GetByteCount(s)];
+        Encoding.UTF8.GetBytes(s, bytes);
+        result = new OctetString(bytes, useReference: true);
+        return true;
+    }
+
+    private static void ValidateFormat(string? format)
+    {
+        if (format is not (null or "" or "G"))
+            throw new FormatException($"The format '{format}' is not supported.");
+    }
+
+    private static void ValidateFormat(ReadOnlySpan<char> format)
+    {
+        if (!format.IsEmpty && !format.SequenceEqual("G"))
+            throw new FormatException($"The format '{format.ToString()}' is not supported.");
     }
 
     /// <summary>

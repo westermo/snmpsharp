@@ -15,6 +15,7 @@
 // 
 
 using System;
+using System.Buffers.Binary;
 
 namespace SnmpSharpNet;
 
@@ -71,17 +72,15 @@ public readonly ref struct SnmpLength
     public readonly int CopyTo(Span<byte> target)
     {
         Span<byte> len = stackalloc byte[sizeof(int)];
-        BitConverter.TryWriteBytes(len, IntegerRepresentation);
-        Span<byte> buf = stackalloc byte[sizeof(int)];
-        var length = 0;
-        for (var i = 3; i >= 0; i--)
-            if (len[i] != 0 || length > 0)
-                buf[length++] = len[i];
-        var cut = buf[..length];
+        BinaryPrimitives.WriteInt32BigEndian(len, IntegerRepresentation);
+        var start = 0;
+        while (start < len.Length && len[start] == 0) start++;
+        var cut = len[start..];
+        var length = cut.Length;
         if (length == 0)
         {
-            cut = buf[..1];
-            cut[0] = 0;
+            len[^1] = 0;
+            cut = len[^1..];
             length = 1;
         }
 
