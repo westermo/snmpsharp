@@ -7,6 +7,7 @@ namespace SnmpSharpNet;
 /// <summary>
 ///     USM security SNMP version 3 target class.
 /// </summary>
+[Obsolete("Use UdpTarget for synchronous or asynchronous SNMP requests.")]
 public class UTarget : ITarget
 {
     /// <summary>

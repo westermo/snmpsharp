@@ -1,5 +1,8 @@
-﻿namespace SnmpSharpNet;
+﻿using System;
 
+namespace SnmpSharpNet;
+
+[Obsolete("Use UdpTransport for datagram I/O.")]
 public class Snmp : UdpTransport
 {
     /// <summary>
@@ -20,13 +23,4 @@ public class Snmp : UdpTransport
 
     #endregion Constructor(s)
 
-    /// <summary>
-    ///     Internal event to send result of the async request to.
-    /// </summary>
-    protected event SnmpAsyncResponse? _response;
-
-    protected virtual void OnResponse(AsyncRequestResult result, SnmpPacket packet)
-    {
-        _response?.Invoke(result, packet);
-    }
 }

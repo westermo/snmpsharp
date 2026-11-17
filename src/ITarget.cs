@@ -1,8 +1,11 @@
-﻿namespace SnmpSharpNet;
+﻿using System;
+
+namespace SnmpSharpNet;
 
 /// <summary>
 ///     SNMP target interface
 /// </summary>
+[Obsolete("Use UdpTarget for synchronous or asynchronous SNMP requests.")]
 public interface ITarget
 {
     /// <summary>

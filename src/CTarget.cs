@@ -6,6 +6,7 @@ namespace SnmpSharpNet;
 /// <summary>
 ///     Community based SNMP target. Used for SNMP version 1 and version 2c.
 /// </summary>
+[Obsolete("Use UdpTarget for synchronous or asynchronous SNMP requests.")]
 public class CTarget : ITarget
 {
     #region Properties
