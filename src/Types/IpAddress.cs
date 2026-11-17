@@ -15,6 +15,7 @@
 // 
 
 using System;
+using System.Buffers.Binary;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Contracts;
 using System.Net;
@@ -696,13 +697,7 @@ public sealed class IpAddress : OctetString, IComparable
     /// <returns>Reversed integer value</returns>
     public static uint ReverseByteOrder(uint val)
     {
-        var v = BitConverter.GetBytes(val);
-        var r = new byte[4];
-        r[0] = v[3];
-        r[1] = v[2];
-        r[2] = v[1];
-        r[3] = v[0];
-        return BitConverter.ToUInt32(r, 0);
+        return BinaryPrimitives.ReverseEndianness(val);
     }
 
     /// <summary>

@@ -15,6 +15,7 @@
 // 
 
 using System;
+using System.Buffers.Binary;
 using System.Security.Cryptography;
 
 namespace SnmpSharpNet;
@@ -81,26 +82,14 @@ public class Privacy3DES : IPrivacyProtocol
         Buffer.BlockCopy(privParamHash, 0, privacyParameters, 0, 8);
         var iv = GetIV(key, privacyParameters);
 
-        byte[] encryptedData;
         try
         {
-            var trippleDes = TripleDES.Create();
-            trippleDes.Mode = CipherMode.CBC;
-            trippleDes.Padding = PaddingMode.None;
-            // normalize key - generated key is 32 bytes long, we need 24 bytes to encrypt
-            var normKey = new byte[24];
-            key[..24].CopyTo(normKey);
-            var transform = trippleDes.CreateEncryptor(normKey, iv);
-            if (length % 8 == 0)
-            {
-                encryptedData = transform.TransformFinalBlock(unencryptedData.ToArray(), offset, length);
-            }
-            else
-            {
-                var tmpbuffer = new byte[8 * (length / 8 + 1)];
-                unencryptedData.Slice(offset, length).CopyTo(tmpbuffer);
-                encryptedData = transform.TransformFinalBlock(tmpbuffer, 0, tmpbuffer.Length);
-            }
+            var paddedLength = checked((length + 7) / 8 * 8);
+            var paddedData = new byte[paddedLength];
+            unencryptedData.Slice(offset, length).CopyTo(paddedData);
+            using var tripleDes = TripleDES.Create();
+            tripleDes.Key = key[..24].ToArray();
+            return tripleDes.EncryptCbc(paddedData, iv, PaddingMode.None);
         }
         catch (Exception ex)
         {
@@ -108,7 +97,6 @@ public class Privacy3DES : IPrivacyProtocol
                 "Exception was thrown while TripleDES privacy protocol was encrypting data\r\n" + ex);
         }
 
-        return encryptedData;
     }
 
     /// <summary>
@@ -141,7 +129,7 @@ public class Privacy3DES : IPrivacyProtocol
         if (encryptedData.IsEmpty || encryptedData.Length < 8)
             throw new ArgumentOutOfRangeException(nameof(encryptedData),
                 "Encrypted data buffer is null or smaller then 8 bytes in length.");
-        if (offset > encryptedData.Length || offset + length > encryptedData.Length)
+        if (offset < 0 || length < 0 || offset > encryptedData.Length - length)
             throw new ArgumentOutOfRangeException(nameof(offset),
                 "Offset and length arguments point beyond the bounds of the encryptedData array.");
         if (key.IsEmpty || key.Length < 32)
@@ -156,16 +144,9 @@ public class Privacy3DES : IPrivacyProtocol
         byte[] decryptedData;
         try
         {
-            var tripleDes = TripleDES.Create();
-            tripleDes.Mode = CipherMode.CBC;
-            tripleDes.Padding = PaddingMode.None;
-
-            // normalize key - generated key is 32 bytes long, we need 24 bytes to encrypt
-            var normKey = new byte[24];
-            key[..24].CopyTo(normKey);
-
-            var transform = tripleDes.CreateDecryptor(normKey, iv);
-            decryptedData = transform.TransformFinalBlock(encryptedData.ToArray(), offset, length);
+            using var tripleDes = TripleDES.Create();
+            tripleDes.Key = key[..24].ToArray();
+            decryptedData = tripleDes.DecryptCbc(encryptedData.Slice(offset, length), iv, PaddingMode.None);
         }
         catch (Exception ex)
         {
@@ -305,17 +286,8 @@ public class Privacy3DES : IPrivacyProtocol
     {
         var salt = new byte[8]; // salt is 8 bytes
         var s = NextSalt();
-        var eb = BitConverter.GetBytes(engineBoots);
-        // C# is little endian so reverse the values
-        salt[3] = eb[0];
-        salt[2] = eb[1];
-        salt[1] = eb[2];
-        salt[0] = eb[3];
-        var sl = BitConverter.GetBytes(s);
-        salt[7] = sl[0];
-        salt[6] = sl[1];
-        salt[5] = sl[2];
-        salt[4] = sl[3];
+        BinaryPrimitives.WriteInt32BigEndian(salt, engineBoots);
+        BinaryPrimitives.WriteInt32BigEndian(salt.AsSpan(4), s);
         return salt;
     }
 

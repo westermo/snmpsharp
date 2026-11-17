@@ -375,34 +375,42 @@ public sealed class Oid : AsnType, ICloneable, IComparable, IEnumerable<uint>
             : data.Aggregate(0, (current, t) => current ^ (t > int.MaxValue ? int.MaxValue : (int)t));
     }
 
-    /// <summary>Parse string formatted oid value into an array of integers</summary>
+    /// <summary>Parses a dotted decimal object identifier without allocating per-arc strings.</summary>
     /// <param name="oidStr">string formatted oid</param>
-    /// <returns>Integer array representing the oid or null if invalid object id was passed</returns>
+    /// <returns>Integer array representing the oid.</returns>
     private static uint[] Parse(string oidStr)
     {
-        if (oidStr is not { Length: > 0 }) return [];
-        // verify correct values are the only ones present in the string
-        if (oidStr.Any(c => !char.IsNumber(c) && c != '.'))
+        if (oidStr.Length == 0) return [];
+        var source = oidStr.AsSpan();
+        if (source[0] == '.') source = source[1..];
+        if (source.IsEmpty)
+            throw new FormatException("Invalid object identifier.");
+
+        var arcCount = 1;
+        foreach (var character in source)
         {
-            return [];
+            if (character == '.')
+                arcCount++;
+            else if (character is < '0' or > '9')
+                throw new FormatException("Invalid object identifier.");
         }
 
-        oidStr = oidStr[0] switch
+        var arcs = new uint[arcCount];
+        var arcIndex = 0;
+        while (true)
         {
-            // check if oid starts with a '.' and remove it if it does
-            '.' => oidStr.Remove(0, 1),
-            _ => oidStr
-        };
+            var separator = source.IndexOf('.');
+            var arcText = separator < 0 ? source : source[..separator];
+            if (arcText.IsEmpty)
+                throw new FormatException("Invalid object identifier.");
+            if (!uint.TryParse(arcText, NumberStyles.None, CultureInfo.InvariantCulture, out arcs[arcIndex]))
+                throw new OverflowException("Object identifier arc exceeds UInt32.");
 
-        // split string into an array
-        var splitString = oidStr.Split(['.'], StringSplitOptions.None);
-
-        return splitString.Length switch
-        {
-            // if we didn't find any entries, return null
-            < 0 => [],
-            _ => splitString.Select(s => Convert.ToUInt32(s)).ToArray()
-        };
+            arcIndex++;
+            if (separator < 0)
+                return arcs;
+            source = source[(separator + 1)..];
+        }
     }
 
     /// <summary>

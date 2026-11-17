@@ -15,6 +15,7 @@
 // 
 
 using System;
+using System.Buffers.Binary;
 using System.Security.Cryptography;
 
 namespace SnmpSharpNet;
@@ -82,40 +83,12 @@ public class PrivacyDES : IPrivacyProtocol
         var outKey = GetKey(key);
 
 
-        var div = (int)Math.Floor(length / 8.0);
-        if (length % 8 != 0)
-            div += 1;
-        var newLength = div * 8;
-        var result = new byte[newLength];
-        var buffer = new byte[newLength];
-
-        var inbuffer = new byte[8];
-        var cipherText = iv;
-        var posIn = 0;
-        var posResult = 0;
-
+        var paddedLength = checked((length + 7) / 8 * 8);
+        var buffer = new byte[paddedLength];
         unencryptedData.Slice(offset, length).CopyTo(buffer);
         using var des = DES.Create();
-        des.Mode = CipherMode.ECB;
-        des.Padding = PaddingMode.None;
-
-        using var transform = des.CreateEncryptor(outKey, null);
-        for (var b = 0; b < div; b++)
-        {
-            for (var i = 0; i < 8; i++)
-            {
-                inbuffer[i] = (byte)(buffer[posIn] ^ cipherText[i]);
-                posIn++;
-            }
-
-            transform.TransformBlock(inbuffer, 0, inbuffer.Length, cipherText, 0);
-            Buffer.BlockCopy(cipherText, 0, result, posResult, cipherText.Length);
-            posResult += cipherText.Length;
-        }
-
-        des.Clear();
-
-        return result;
+        des.Key = outKey;
+        return des.EncryptCbc(buffer, iv, PaddingMode.None);
     }
 
     /// <summary>
@@ -153,25 +126,18 @@ public class PrivacyDES : IPrivacyProtocol
 
         if (key.IsEmpty || key.Length < MinimumKeyLength)
             throw new ArgumentOutOfRangeException(nameof(key), "Decryption key has to be at least 16 bytes long.");
+        if (offset < 0 || length < 0 || offset > encryptedData.Length - length)
+            throw new ArgumentOutOfRangeException(nameof(offset), "Offset and length exceed the encrypted data.");
 
         var iv = new byte[8];
         for (var i = 0; i < 8; ++i) iv[i] = (byte)(key[8 + i] ^ privacyParameters[i]);
         using var des = DES.Create();
-        des.Mode = CipherMode.CBC;
-        des.Padding = PaddingMode.Zeros;
 
         // .NET implementation only takes an 8 byte key
         var outKey = new byte[8];
         key[..8].CopyTo(outKey);
-
         des.Key = outKey;
-        des.IV = iv;
-        using var transform = des.CreateDecryptor();
-
-        var decryptedData = transform.TransformFinalBlock(encryptedData.ToArray(), 0, encryptedData.Length);
-        des.Clear();
-
-        return decryptedData;
+        return des.DecryptCbc(encryptedData.Slice(offset, length), iv, PaddingMode.None);
     }
 
     /// <summary>
@@ -281,17 +247,8 @@ public class PrivacyDES : IPrivacyProtocol
     {
         var salt = new byte[8]; // salt is 8 bytes
         var s = NextSalt();
-        var eb = BitConverter.GetBytes(engineBoots);
-        // C# is little endian so reverse the values
-        salt[3] = eb[0];
-        salt[2] = eb[1];
-        salt[1] = eb[2];
-        salt[0] = eb[3];
-        var sl = BitConverter.GetBytes(s);
-        salt[7] = sl[0];
-        salt[6] = sl[1];
-        salt[5] = sl[2];
-        salt[4] = sl[3];
+        BinaryPrimitives.WriteInt32BigEndian(salt, engineBoots);
+        BinaryPrimitives.WriteInt32BigEndian(salt.AsSpan(4), s);
         return salt;
     }
 

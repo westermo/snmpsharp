@@ -228,6 +228,8 @@ public sealed class SHA224 : HashAlgorithm
     public override void Initialize()
     {
         Array.Copy(_initialHashValues, _state, _initialHashValues.Length);
+        Array.Clear(_buffer, 0, _buffer.Length);
+        _bufferLength = 0;
     }
 
     protected override void HashCore(byte[] array, int initialBlockStart, int currentBlockSize)

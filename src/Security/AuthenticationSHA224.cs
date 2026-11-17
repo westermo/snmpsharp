@@ -60,7 +60,7 @@ public class AuthenticationSHA224 : IAuthenticationDigest
     public byte[] Authenticate(ReadOnlySpan<byte> authKey, ReadOnlySpan<byte> wholeMessage)
     {
         var result = new byte[authenticationLength];
-        using var sha = new HMACSHA224(authKey.ToArray());
+        using var sha = new HMACSHA224(authKey);
         sha.WithHashed(wholeMessage, (span, _) => { span[..authenticationLength].CopyTo(result); });
         return result;
     }
@@ -93,7 +93,7 @@ public class AuthenticationSHA224 : IAuthenticationDigest
     public bool AuthenticateIncomingMsg(ReadOnlySpan<byte> authKey, ReadOnlySpan<byte> authenticationParameters,
         ReadOnlySpan<byte> wholeMessage)
     {
-        using var sha = new HMACSHA224(authKey.ToArray());
+        using var sha = new HMACSHA224(authKey);
         return sha.CompareHashed(wholeMessage, authenticationParameters);
     }
 

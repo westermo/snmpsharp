@@ -174,6 +174,27 @@ public class TypeConversionTests
     }
 
     [Test]
+    public async Task Oid_StringParserSupportsLeadingDotAndUInt32Arcs()
+    {
+        var oid = new Oid(".1.3.4294967295");
+
+        await Assert.That(oid.ToString()).IsEqualTo("1.3.4294967295");
+    }
+
+    [Test]
+    public async Task Oid_StringParserRejectsNonAsciiDigitsAndOverflow()
+    {
+        await Assert.That(() => new Oid("1.\u0663.6")).Throws<FormatException>();
+        await Assert.That(() => new Oid("1.4294967296")).Throws<OverflowException>();
+    }
+
+    [Test]
+    public async Task IpAddress_ReverseByteOrderUsesNetworkOrder()
+    {
+        await Assert.That(IpAddress.ReverseByteOrder(0x01020304)).IsEqualTo(0x04030201u);
+    }
+
+    [Test]
     public async Task Oid_UIntArrayRoundTrip_ReturnsCopy()
     {
         Oid oid = new uint[] { 1, 3, 6 };
