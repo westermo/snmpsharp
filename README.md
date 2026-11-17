@@ -58,6 +58,16 @@ methods remain blocking wrappers.
 SNMP privacy salts are now initialized with cryptographic randomness, and generated
 request IDs no longer use time-seeded `Random` instances.
 
+## Diagnostics
+
+The library emits `snmp.request` and `udp.request` activities from the
+`Westermo.SnmpSharpNet` activity source. Its `Westermo.SnmpSharpNet` meter records
+`snmpsharp.requests` (tagged with SNMP version, operation, and outcome),
+`snmpsharp.request.duration` (milliseconds), `snmpsharp.retries`, `snmpsharp.timeouts`,
+and `snmpsharp.authentication.failures`. Listen to the source/meter with
+`ActivityListener`/`MeterListener` or configure them through OpenTelemetry. Peer addresses,
+community strings, usernames, and credentials are not included in diagnostic tags.
+
 # Pipeline statuses
 [![Docker Image CI](https://github.com/westermo/snmpsharp/actions/workflows/docker-image.yml/badge.svg)](https://github.com/westermo/snmpsharp/actions/workflows/docker-image.yml)
 [![CodeQL](https://github.com/westermo/snmpsharp/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/westermo/snmpsharp/actions/workflows/codeql-analysis.yml)

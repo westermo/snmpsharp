@@ -1,3 +1,6 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Net;
 using System.Net.Sockets;
 
@@ -26,6 +29,82 @@ public class UdpTargetAsyncTests
         await Assert.That(packet.Pdu.Type).IsEqualTo(PduType.Response);
         await Assert.That(packet.Pdu.RequestId).IsEqualTo(pdu.RequestId);
         await Assert.That(target.IsBusy).IsFalse();
+    }
+
+    [Test]
+    public async Task RequestAsync_EmitsActivityAndRequestMetrics()
+    {
+        var activities = new ConcurrentBag<Activity>();
+        var measurements = new ConcurrentBag<(string Name, long Value, KeyValuePair<string, object?>[] Tags)>();
+        var histogramNames = new ConcurrentBag<string>();
+        using var activityListener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == SnmpDiagnostics.ActivitySourceName,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStopped = activity => activities.Add(activity)
+        };
+        ActivitySource.AddActivityListener(activityListener);
+        using var meterListener = new MeterListener
+        {
+            InstrumentPublished = (instrument, listener) =>
+            {
+                if (instrument.Meter.Name == SnmpDiagnostics.MeterName)
+                    listener.EnableMeasurementEvents(instrument);
+            }
+        };
+        meterListener.SetMeasurementEventCallback<long>((instrument, value, tags, _) =>
+            measurements.Add((instrument.Name, value, tags.ToArray())));
+        meterListener.SetMeasurementEventCallback<double>((instrument, _, _, _) =>
+            histogramNames.Add(instrument.Name));
+        meterListener.Start();
+
+        await using var agent = new FakeAgent();
+        using var target = new UdpTarget(IPAddress.Loopback, agent.Port, 1000, 0);
+        await target.RequestAsync(GetPdu(), V2Parameters()).WaitAsync(TestTimeout);
+
+        var activity = activities.Single(item => item.OperationName == "snmp.request");
+        await Assert.That(activity.Status).IsEqualTo(ActivityStatusCode.Ok);
+        await Assert.That(activity.GetTagItem("snmp.version")).IsEqualTo(SnmpVersion.Ver2.ToString());
+        var request = measurements.Single(item => item.Name == "snmpsharp.requests");
+        await Assert.That(request.Value).IsEqualTo(1L);
+        await Assert.That(request.Tags.Single(tag => tag.Key == "outcome").Value).IsEqualTo("success");
+        await Assert.That(histogramNames.Contains("snmpsharp.request.duration")).IsTrue();
+    }
+
+    [Test]
+    public async Task RequestAsync_RecordsTimeoutAndRetryMetrics()
+    {
+        var measurements = new ConcurrentBag<(string Name, long Value, KeyValuePair<string, object?>[] Tags)>();
+        using var meterListener = CreateMeterListener(measurements);
+        await using var agent = new FakeAgent(ignoreFirst: int.MaxValue);
+        using var target = new UdpTarget(IPAddress.Loopback, agent.Port, 50, 1);
+
+        await Assert.That(async () => await target.RequestAsync(GetPdu(), V2Parameters()).WaitAsync(TestTimeout))
+            .Throws<SnmpException>();
+
+        await Assert.That(measurements.Single(item => item.Name == "snmpsharp.retries").Value).IsEqualTo(1L);
+        await Assert.That(measurements.Single(item => item.Name == "snmpsharp.timeouts").Value).IsEqualTo(1L);
+        var request = measurements.Single(item => item.Name == "snmpsharp.requests");
+        await Assert.That(request.Tags.Single(tag => tag.Key == "outcome").Value).IsEqualTo("timeout");
+    }
+
+    [Test]
+    public async Task RequestAsync_RecordsAuthenticationFailure()
+    {
+        var measurements = new ConcurrentBag<(string Name, long Value, KeyValuePair<string, object?>[] Tags)>();
+        using var meterListener = CreateMeterListener(measurements);
+        await using var agent = new FakeAgent(mutateReply: packet =>
+            ((SnmpV2Packet)packet).Community.Set("wrong"));
+        using var target = new UdpTarget(IPAddress.Loopback, agent.Port, 1000, 0);
+
+        await Assert.That(async () => await target.RequestAsync(GetPdu(), V2Parameters()).WaitAsync(TestTimeout))
+            .Throws<SnmpAuthenticationException>();
+
+        await Assert.That(measurements.Single(item => item.Name == "snmpsharp.authentication.failures").Value)
+            .IsEqualTo(1L);
+        var request = measurements.Single(item => item.Name == "snmpsharp.requests");
+        await Assert.That(request.Tags.Single(tag => tag.Key == "outcome").Value)
+            .IsEqualTo("authentication_failure");
     }
 
     [Test]
@@ -388,6 +467,23 @@ public class UdpTargetAsyncTests
     }
 
     private static AgentParameters V2Parameters() => new(SnmpVersion.Ver2, new OctetString("public"));
+
+    private static MeterListener CreateMeterListener(
+        ConcurrentBag<(string Name, long Value, KeyValuePair<string, object?>[] Tags)> measurements)
+    {
+        var listener = new MeterListener
+        {
+            InstrumentPublished = (instrument, meterListener) =>
+            {
+                if (instrument.Meter.Name == SnmpDiagnostics.MeterName)
+                    meterListener.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<long>((instrument, value, tags, _) =>
+            measurements.Add((instrument.Name, value, tags.ToArray())));
+        listener.Start();
+        return listener;
+    }
 
     private sealed class FakeAgent : IAsyncDisposable
     {

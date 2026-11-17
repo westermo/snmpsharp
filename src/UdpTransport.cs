@@ -15,6 +15,7 @@
 
 using System;
 using System.Buffers;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -122,6 +123,9 @@ public class UdpTransport : IDisposable
                 throw new InvalidOperationException("A request is in progress.");
         }
 
+        using var activity = SnmpDiagnostics.ActivitySource.StartActivity("udp.request", ActivityKind.Client);
+        activity?.SetTag("network.transport", "udp");
+        activity?.SetTag("network.address.family", peer.AddressFamily.ToString());
         byte[]? receiveBuffer = null;
         try
         {
@@ -142,6 +146,7 @@ public class UdpTransport : IDisposable
                             SocketFlags.None, anyPeer, attemptCancellation.Token).ConfigureAwait(false);
                         if (!disableSourceCheck && !result.RemoteEndPoint.Equals(netPeer)) continue;
                         if (result.ReceivedBytes == 0) break;
+                        activity?.SetStatus(ActivityStatusCode.Ok);
                         return receiveBuffer.AsSpan(0, result.ReceivedBytes).ToArray();
                     }
                 }
@@ -167,8 +172,24 @@ public class UdpTransport : IDisposable
                 }
 
                 if (attempt >= retries)
+                {
+                    SnmpDiagnostics.Timeouts.Add(1, SnmpDiagnostics.TransportTags("timeout"));
+                    activity?.SetStatus(ActivityStatusCode.Error, "request timed out");
                     throw new SnmpException(SnmpException.RequestTimedOut, "Request has reached maximum retries.");
+                }
+
+                SnmpDiagnostics.Retries.Add(1, SnmpDiagnostics.TransportTags("retry"));
             }
+        }
+        catch (OperationCanceledException)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, "request canceled");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.GetType().Name);
+            throw;
         }
         finally
         {

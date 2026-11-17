@@ -14,6 +14,7 @@
 // along with SNMP#NET. If not, see <http://www.gnu.org/licenses/>.
 
 using System;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -97,6 +98,53 @@ public class UdpTarget : UdpTransport
     /// <returns>The decoded and validated response packet.</returns>
     public async Task<SnmpPacket> RequestAsync(Pdu pdu, IAgentParameters agentParameters,
         CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(pdu);
+        ArgumentNullException.ThrowIfNull(agentParameters);
+        var tags = SnmpDiagnostics.RequestTags(agentParameters.Version, pdu.Type, "success");
+        using var activity = SnmpDiagnostics.ActivitySource.StartActivity("snmp.request", ActivityKind.Client);
+        activity?.SetTag("snmp.version", agentParameters.Version.ToString());
+        activity?.SetTag("snmp.operation", pdu.Type.ToString());
+        var started = Stopwatch.GetTimestamp();
+        try
+        {
+            var response = await RequestCoreAsync(pdu, agentParameters, cancellationToken).ConfigureAwait(false);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return response;
+        }
+        catch (OperationCanceledException)
+        {
+            tags = SnmpDiagnostics.RequestTags(agentParameters.Version, pdu.Type, "canceled");
+            activity?.SetStatus(ActivityStatusCode.Error, "request canceled");
+            throw;
+        }
+        catch (SnmpAuthenticationException)
+        {
+            tags = SnmpDiagnostics.RequestTags(agentParameters.Version, pdu.Type, "authentication_failure");
+            SnmpDiagnostics.AuthenticationFailures.Add(1,
+                SnmpDiagnostics.RequestTags(agentParameters.Version, pdu.Type, "authentication_failure"));
+            activity?.SetStatus(ActivityStatusCode.Error, nameof(SnmpAuthenticationException));
+            throw;
+        }
+        catch (Exception ex)
+        {
+            tags = SnmpDiagnostics.RequestTags(agentParameters.Version, pdu.Type,
+                ex is SnmpException snmpException && snmpException.ErrorCode == SnmpException.RequestTimedOut
+                    ? "timeout"
+                    : "failure");
+            activity?.SetStatus(ActivityStatusCode.Error, ex.GetType().Name);
+            throw;
+        }
+        finally
+        {
+            SnmpDiagnostics.Requests.Add(1, tags);
+            SnmpDiagnostics.RequestDuration.Record(Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+                tags);
+        }
+    }
+
+    private async Task<SnmpPacket> RequestCoreAsync(Pdu pdu, IAgentParameters agentParameters,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(pdu);
         ArgumentNullException.ThrowIfNull(agentParameters);
