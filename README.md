@@ -97,6 +97,8 @@ Converting a `string` to `Oid` throws `FormatException`/`OverflowException` for 
 
 `SnmpSharpNet.Mib.SourceGenerator` is a Roslyn incremental source generator that reads `.mib` files at compile time and emits a strongly typed, global C# representation of the complete OID tree. No attributes or hand-written partial classes are required.
 
+The packaged generator supports Roslyn 5.0 or later on a .NET 10 or later compiler host and emits C# 14 code. This is separate from the core library, which targets `net11.0`; .NET 10 projects still need a compatible core package.
+
 ## Basic usage
 
 Add the generator as an `Analyzer` reference and list your MIB files as `AdditionalFiles`:

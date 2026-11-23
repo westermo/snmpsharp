@@ -4,7 +4,8 @@
         <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
     </PropertyGroup>
     <PropertyGroup>
-        <CompilerVersion>5.12.0</CompilerVersion>
+        <!-- Keep the generator's Roslyn API floor independent of the build SDK. -->
+        <CompilerVersion>5.0.0</CompilerVersion>
         <DotnetVersion>11.0.0</DotnetVersion>
         <VerifyVersion>31.27.0</VerifyVersion>
     </PropertyGroup>
@@ -20,7 +21,7 @@
         <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="$(CompilerVersion)"/>
         <PackageVersion Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="$(CompilerVersion)"/>
         <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="$(CompilerVersion)"/>
-        <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="$(CompilerVersion)"/>
+        <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="5.12.0"/>
         <PackageVersion Include="Microsoft.Build.Framework" Version="$(BuildVersion)"/>
         <PackageVersion Include="Microsoft.Build.Tasks.Core" Version="$(BuildVersion)"/>
         <PackageVersion Include="Microsoft.Build.Utilities.Core" Version="$(BuildVersion)"/>
