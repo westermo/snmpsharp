@@ -1,7 +1,8 @@
-FROM mcr.microsoft.com/dotnet/sdk:10.0
+FROM mcr.microsoft.com/dotnet/sdk:11.0
 
-WORKDIR /src
+WORKDIR /workspace
 
-COPY src /src/
+COPY Directory.Build.props Directory.Packages.props ./
+COPY src/ src/
 
-CMD ["dotnet", "build", "--configuration", "Release", "./SnmpSharpNet.csproj"]
+CMD ["dotnet", "build", "--configuration", "Release", "src/SnmpSharpNet.csproj"]

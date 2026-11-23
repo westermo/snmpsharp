@@ -1,13 +1,13 @@
-FROM mcr.microsoft.com/dotnet/sdk:10.0
+FROM mcr.microsoft.com/dotnet/sdk:11.0
 ARG CONFIGURATION=Release
 
-WORKDIR /src
+WORKDIR /workspace
 
-COPY src /src/
+COPY Directory.Build.props Directory.Packages.props ./
+COPY src/ src/
 
-RUN mkdir /output && \
-    dotnet build --configuration "${CONFIGURATION}" ./SnmpSharpNet.csproj && \
-    dotnet pack --configuration "${CONFIGURATION}" -o /output ./SnmpSharpNet.csproj
+RUN dotnet build --configuration "${CONFIGURATION}" src/SnmpSharpNet.csproj && \
+    dotnet pack --configuration "${CONFIGURATION}" --no-build -o /output src/SnmpSharpNet.csproj
 
 ENV NUGET_TOKEN=
 
