@@ -27,7 +27,7 @@ namespace SnmpSharpNet;
 ///     roll over to 0.
 /// </remarks>
 [Serializable]
-public class Counter32 : UInteger32, ICloneable
+public class Counter32 : UInteger32
 {
     /// <summary>Constructor</summary>
     public Counter32()

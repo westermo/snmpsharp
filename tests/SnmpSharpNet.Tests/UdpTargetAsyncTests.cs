@@ -8,6 +8,8 @@ namespace SnmpSharpNet.Tests;
 
 public class UdpTargetAsyncTests
 {
+    private const string WalkRoot = "1.3.6.1.2.1.1";
+    private const string WalkLeaf = WalkRoot + ".1.0";
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(10);
 
     [Test]
@@ -34,6 +36,7 @@ public class UdpTargetAsyncTests
     [Test]
     public async Task RequestAsync_EmitsActivityAndRequestMetrics()
     {
+        using var scope = StartDiagnosticsScope();
         var activities = new ConcurrentBag<Activity>();
         var measurements = new ConcurrentBag<(string Name, long Value, KeyValuePair<string, object?>[] Tags)>();
         var histogramNames = new ConcurrentBag<string>();
@@ -41,22 +44,14 @@ public class UdpTargetAsyncTests
         {
             ShouldListenTo = source => source.Name == SnmpDiagnostics.ActivitySourceName,
             Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
-            ActivityStopped = activity => activities.Add(activity)
-        };
-        ActivitySource.AddActivityListener(activityListener);
-        using var meterListener = new MeterListener
-        {
-            InstrumentPublished = (instrument, listener) =>
+            ActivityStopped = activity =>
             {
-                if (instrument.Meter.Name == SnmpDiagnostics.MeterName)
-                    listener.EnableMeasurementEvents(instrument);
+                if (activity.TraceId == scope.TraceId)
+                    activities.Add(activity);
             }
         };
-        meterListener.SetMeasurementEventCallback<long>((instrument, value, tags, _) =>
-            measurements.Add((instrument.Name, value, tags.ToArray())));
-        meterListener.SetMeasurementEventCallback<double>((instrument, _, _, _) =>
-            histogramNames.Add(instrument.Name));
-        meterListener.Start();
+        ActivitySource.AddActivityListener(activityListener);
+        using var meterListener = CreateMeterListener(scope.TraceId, measurements, histogramNames);
 
         await using var agent = new FakeAgent();
         using var target = new UdpTarget(IPAddress.Loopback, agent.Port, 1000, 0);
@@ -74,8 +69,9 @@ public class UdpTargetAsyncTests
     [Test]
     public async Task RequestAsync_RecordsTimeoutAndRetryMetrics()
     {
+        using var scope = StartDiagnosticsScope();
         var measurements = new ConcurrentBag<(string Name, long Value, KeyValuePair<string, object?>[] Tags)>();
-        using var meterListener = CreateMeterListener(measurements);
+        using var meterListener = CreateMeterListener(scope.TraceId, measurements);
         await using var agent = new FakeAgent(ignoreFirst: int.MaxValue);
         using var target = new UdpTarget(IPAddress.Loopback, agent.Port, 50, 1);
 
@@ -91,8 +87,9 @@ public class UdpTargetAsyncTests
     [Test]
     public async Task RequestAsync_RecordsAuthenticationFailure()
     {
+        using var scope = StartDiagnosticsScope();
         var measurements = new ConcurrentBag<(string Name, long Value, KeyValuePair<string, object?>[] Tags)>();
-        using var meterListener = CreateMeterListener(measurements);
+        using var meterListener = CreateMeterListener(scope.TraceId, measurements);
         await using var agent = new FakeAgent(mutateReply: packet =>
             ((SnmpV2Packet)packet).Community.Set("wrong"));
         using var target = new UdpTarget(IPAddress.Loopback, agent.Port, 1000, 0);
@@ -199,7 +196,9 @@ public class UdpTargetAsyncTests
             await Assert.That(target.IsBusy).IsTrue();
             await Assert.That(async () => await target.RequestAsync(GetPdu(), V2Parameters()))
                 .Throws<InvalidOperationException>();
+#pragma warning disable CS0618 // The obsolete wrapper must still respect the async transport's busy state.
             await Assert.That(() => target.Request(GetPdu(), V2Parameters())).Throws<InvalidOperationException>();
+#pragma warning restore CS0618
         }
         finally
         {
@@ -280,7 +279,9 @@ public class UdpTargetAsyncTests
         await using var agent = new FakeAgent();
         using var target = new UdpTarget(IPAddress.Loopback, agent.Port, 1000, 0);
 
+#pragma warning disable CS0618 // Exercise the obsolete synchronous wrapper.
         var packet = target.Request(GetPdu(), V2Parameters());
+#pragma warning restore CS0618
 
         await Assert.That(packet!.Pdu.Type).IsEqualTo(PduType.Response);
         await Assert.That(target.IsBusy).IsFalse();
@@ -321,7 +322,9 @@ public class UdpTargetAsyncTests
         var padded = new byte[outgoing.Length + 100];
         outgoing.CopyTo(padded, 0);
 
+#pragma warning disable CS0618 // Exercise the obsolete synchronous wrapper.
         var response = transport.Request(IPAddress.Loopback, agent.Port, padded, outgoing.Length, 1000, 0);
+#pragma warning restore CS0618
 
         await Assert.That(agent.LastRequestLength).IsEqualTo(outgoing.Length);
         var packet = new SnmpV2Packet(response);
@@ -389,21 +392,201 @@ public class UdpTargetAsyncTests
     }
 
     [Test]
-    public async Task SimpleSnmpWalkAsync_YieldsBindingsAndStopsOnNonIncreasingOid()
+    public async Task SimpleSnmpAsync_PropagatesConfigurationAndVersionErrors()
     {
+        var snmp = new SimpleSnmp();
+
+        await Assert.That(async () => await snmp.GetAsync(SnmpVersion.Ver2, GetPdu()))
+            .Throws<SnmpException>();
+        await Assert.That(async () => await snmp.GetBulkAsync(GetPdu(), SnmpVersion.Ver1))
+            .Throws<SnmpInvalidVersionException>();
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task SimpleSnmpWalkAsync_ThrowsOnNonIncreasingOid(bool duplicateInSameReply)
+    {
+        var root = new Oid(WalkRoot);
+        var leaf = new Oid(WalkLeaf);
         await using var agent = new FakeAgent(mutateReply: packet =>
         {
+            var firstReply = packet.Pdu.VbList[0].Oid!.Equals(root);
             packet.Pdu.VbList.Clear();
-            packet.Pdu.VbList.Add(new Vb(new Oid("1.3.6.1.2.1.1.1.0"), new OctetString("test")));
+            if (firstReply)
+            {
+                packet.Pdu.VbList.Add(leaf, new OctetString("first"));
+                if (duplicateInSameReply)
+                    packet.Pdu.VbList.Add(leaf, new OctetString("duplicate"));
+            }
+            else
+            {
+                var oid = duplicateInSameReply ? new Oid("1.3.6.1.2.1.2.1.0") : leaf;
+                packet.Pdu.VbList.Add(oid, new OctetString("next"));
+            }
         });
         var snmp = new SimpleSnmp("127.0.0.1", agent.Port, "public", 1000, 0);
         var results = new List<KeyValuePair<Oid, AsnType>>();
 
-        await foreach (var binding in snmp.WalkAsync(SnmpVersion.Ver2, "1.3.6.1.2.1.1"))
-            results.Add(binding);
+        async Task WalkAndCollectAsync()
+        {
+            await foreach (var binding in snmp.WalkAsync(SnmpVersion.Ver2, WalkRoot))
+                results.Add(binding);
+        }
+
+        await Assert.That(WalkAndCollectAsync).Throws<SnmpException>();
 
         await Assert.That(results.Count).IsEqualTo(1);
-        await Assert.That(results[0].Value.ToString()).IsEqualTo("test");
+        await Assert.That(results[0].Value.ToString()).IsEqualTo("first");
+        await Assert.That(agent.RequestCount).IsEqualTo(duplicateInSameReply ? 1 : 2);
+    }
+
+    [Test]
+    [Arguments(SnmpVersion.Ver1, false)]
+    [Arguments(SnmpVersion.Ver1, true)]
+    [Arguments(SnmpVersion.Ver2, true)]
+    public async Task SimpleSnmpWalkAsync_CompletesNormallyAtEndOfMib(SnmpVersion version, bool returnBinding)
+    {
+        var root = new Oid(WalkRoot);
+        var leaf = new Oid(WalkLeaf);
+        await using var agent = new FakeAgent(version: version, mutateReply: packet =>
+        {
+            var cursor = packet.Pdu.VbList[0].Oid!;
+            if (returnBinding && cursor.Equals(root))
+            {
+                packet.Pdu.VbList.Clear();
+                packet.Pdu.VbList.Add(leaf, new OctetString("test"));
+            }
+            else if (version == SnmpVersion.Ver1)
+            {
+                packet.Pdu.ErrorStatus = SnmpConstants.ErrNoSuchName;
+                packet.Pdu.ErrorIndex = 1;
+            }
+            else
+            {
+                packet.Pdu.VbList.Clear();
+                packet.Pdu.VbList.Add(cursor, new EndOfMibView());
+            }
+        });
+        var snmp = new SimpleSnmp("127.0.0.1", agent.Port, "public", 1000, 0);
+        var oids = new List<Oid>();
+
+        await foreach (var binding in snmp.WalkAsync(version, WalkRoot))
+            oids.Add(binding.Key);
+
+        await Assert.That(oids.Count).IsEqualTo(returnBinding ? 1 : 0);
+        if (returnBinding)
+            await Assert.That(oids[0]).IsEqualTo(leaf);
+        await Assert.That(agent.RequestCount).IsEqualTo(returnBinding ? 2 : 1);
+    }
+
+    [Test]
+    public async Task SimpleSnmpWalkAsync_PropagatesOtherV1AgentErrors()
+    {
+        await using var agent = new FakeAgent(version: SnmpVersion.Ver1, mutateReply: packet =>
+        {
+            packet.Pdu.ErrorStatus = SnmpConstants.ErrGenError;
+            packet.Pdu.ErrorIndex = 1;
+        });
+        var snmp = new SimpleSnmp("127.0.0.1", agent.Port, "public", 1000, 0);
+        await using var walker = snmp.WalkAsync(SnmpVersion.Ver1, WalkRoot).GetAsyncEnumerator();
+
+        await Assert.That(async () => await walker.MoveNextAsync()).Throws<SnmpErrorStatusException>();
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task SimpleSnmpGetAsync_RediscoversAfterInterruptedDiscovery(bool cancelDiscovery)
+    {
+        var discoveryBindings = new ConcurrentQueue<int>();
+        await using var agent = new FakeAgent(ignoreFirst: 1, version: SnmpVersion.Ver3, mutateReply: packet =>
+        {
+            var reply = (SnmpV3Packet)packet;
+            if (reply.IsDiscoveryPacket)
+            {
+                discoveryBindings.Enqueue(reply.Pdu.VbCount);
+                SetV3Report(reply, SnmpConstants.usmStatsUnknownEngineIDs);
+                return;
+            }
+
+            reply.Pdu.VbList.Clear();
+            reply.Pdu.VbList.Add(new Oid(WalkLeaf), new OctetString(reply.USM.SecurityName));
+        });
+        var snmp = new SimpleSnmp("127.0.0.1", agent.Port, "test-user", AuthenticationDigests.None, "",
+            PrivacyProtocols.None, "", "") { Timeout = cancelDiscovery ? 5000 : 150, Retry = 0 };
+        using var cancellation = new CancellationTokenSource();
+        var firstRequest = snmp.GetAsync(SnmpVersion.Ver3, [WalkLeaf], cancellation.Token);
+        await agent.FirstRequest.WaitAsync(TestTimeout);
+
+        if (cancelDiscovery)
+        {
+            cancellation.Cancel();
+            await Assert.That(async () => await firstRequest.WaitAsync(TestTimeout)).Throws<OperationCanceledException>();
+        }
+        else
+        {
+            await Assert.That(async () => await firstRequest.WaitAsync(TestTimeout)).Throws<SnmpException>();
+            await Assert.That(((SnmpException)firstRequest.Exception!.InnerException!).ErrorCode)
+                .IsEqualTo(SnmpException.RequestTimedOut);
+        }
+
+        snmp.Timeout = 1000;
+        var result = await snmp.GetAsync(SnmpVersion.Ver3, [WalkLeaf]).WaitAsync(TestTimeout);
+
+        await Assert.That(agent.RequestCount).IsEqualTo(3);
+        await Assert.That(discoveryBindings.Single()).IsEqualTo(0);
+        await Assert.That(result[new Oid(WalkLeaf)].ToString()).IsEqualTo("test-user");
+    }
+
+    [Test]
+    public async Task SimpleSnmpGetAsync_RejectsDiscoveryWithoutAnEngineId()
+    {
+        await using var agent = new FakeAgent(version: SnmpVersion.Ver3);
+        var snmp = new SimpleSnmp("127.0.0.1", agent.Port, "public", 1000, 0);
+
+        await Assert.That(async () => await snmp.GetAsync(SnmpVersion.Ver3, [WalkLeaf]).WaitAsync(TestTimeout))
+            .Throws<SnmpException>();
+        await Assert.That(agent.RequestCount).IsEqualTo(2);
+    }
+
+    [Test]
+    [Arguments(false, false)]
+    [Arguments(true, false)]
+    [Arguments(true, true)]
+    public async Task SimpleSnmpAsync_HandlesV3Reports(bool timeWindowReport, bool recoverOnRetry)
+    {
+        var reportOid = timeWindowReport ? SnmpConstants.usmStatsNotInTimeWindows
+            : SnmpConstants.usmStatsUnknownSecurityNames;
+        var operationReplies = 0;
+        await using var agent = new FakeAgent(version: SnmpVersion.Ver3, mutateReply: packet =>
+        {
+            var reply = (SnmpV3Packet)packet;
+            if (reply.IsDiscoveryPacket)
+                SetV3Report(reply, SnmpConstants.usmStatsUnknownEngineIDs);
+            else if (!recoverOnRetry || ++operationReplies == 1)
+                SetV3Report(reply, reportOid);
+        });
+        var snmp = new SimpleSnmp("127.0.0.1", agent.Port, "public", 1000, 0);
+
+        var request = timeWindowReport
+            ? snmp.SetAsync(SnmpVersion.Ver3, [new Vb(new Oid(WalkLeaf), new Integer32(1))])
+            : snmp.GetAsync(SnmpVersion.Ver3, [WalkLeaf]);
+
+        if (recoverOnRetry)
+        {
+            var bindings = await request.WaitAsync(TestTimeout);
+            await Assert.That(bindings[new Oid(WalkLeaf)].ToString()).IsEqualTo("1");
+        }
+        else
+        {
+            await Assert.That(async () => await request.WaitAsync(TestTimeout)).Throws<SnmpException>();
+            await Assert.That(request.Exception!.InnerException!.Message).Contains(timeWindowReport
+                ? nameof(SnmpConstants.usmStatsNotInTimeWindows)
+                : nameof(SnmpConstants.usmStatsUnknownSecurityNames));
+        }
+
+        await Assert.That(agent.RequestCount).IsEqualTo(timeWindowReport ? 3 : 2);
     }
 
     [Test]
@@ -414,6 +597,22 @@ public class UdpTargetAsyncTests
         await Assert.That(snmp.PeerIP).IsEqualTo(IPAddress.None);
         await Assert.That(await snmp.ResolveAsync().WaitAsync(TestTimeout)).IsTrue();
         await Assert.That(snmp.PeerIP.Equals(IPAddress.None)).IsFalse();
+    }
+
+    [Test]
+    public async Task SimpleSnmpResolution_PreservesDnsErrorsForRequestsWithoutSuppression()
+    {
+        var snmp = new SimpleSnmp(new string('x', 512));
+
+        await Assert.That(await snmp.ResolveAsync()).IsFalse();
+        await Assert.That(async () => await snmp.GetAsync(SnmpVersion.Ver2, GetPdu()))
+            .Throws<ArgumentOutOfRangeException>();
+
+#pragma warning disable CS0618 // Exercise the legacy exception-suppression contract.
+        await Assert.That(snmp.Get(SnmpVersion.Ver2, GetPdu())).IsNull();
+        snmp.SuppressExceptions = false;
+        await Assert.That(() => snmp.Get(SnmpVersion.Ver2, GetPdu())).Throws<ArgumentOutOfRangeException>();
+#pragma warning restore CS0618
     }
 
     [Test]
@@ -468,8 +667,23 @@ public class UdpTargetAsyncTests
 
     private static AgentParameters V2Parameters() => new(SnmpVersion.Ver2, new OctetString("public"));
 
-    private static MeterListener CreateMeterListener(
-        ConcurrentBag<(string Name, long Value, KeyValuePair<string, object?>[] Tags)> measurements)
+    private static void SetV3Report(SnmpV3Packet packet, Oid oid)
+    {
+        packet.SetEngineId([0x80, 0, 0, 1, 2]);
+        packet.SetEngineTime(1, 10);
+        packet.MsgFlags.Reportable = false;
+        packet.Pdu.Type = PduType.Report;
+        packet.Pdu.VbList.Clear();
+        packet.Pdu.VbList.Add(oid, new Counter32(1));
+    }
+
+    private static Activity StartDiagnosticsScope() => new Activity("test.snmp")
+        .SetParentId(ActivityTraceId.CreateRandom(), ActivitySpanId.CreateRandom(), ActivityTraceFlags.None)
+        .Start();
+
+    private static MeterListener CreateMeterListener(ActivityTraceId traceId,
+        ConcurrentBag<(string Name, long Value, KeyValuePair<string, object?>[] Tags)> measurements,
+        ConcurrentBag<string>? histogramNames = null)
     {
         var listener = new MeterListener
         {
@@ -480,7 +694,16 @@ public class UdpTargetAsyncTests
             }
         };
         listener.SetMeasurementEventCallback<long>((instrument, value, tags, _) =>
-            measurements.Add((instrument.Name, value, tags.ToArray())));
+        {
+            if (Activity.Current?.TraceId == traceId)
+                measurements.Add((instrument.Name, value, tags.ToArray()));
+        });
+        if (histogramNames is not null)
+            listener.SetMeasurementEventCallback<double>((instrument, _, _, _) =>
+            {
+                if (Activity.Current?.TraceId == traceId)
+                    histogramNames.Add(instrument.Name);
+            });
         listener.Start();
         return listener;
     }

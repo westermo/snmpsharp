@@ -25,7 +25,7 @@ namespace SnmpSharpNet;
 /// <summary>
 ///     User security model implementation class.
 /// </summary>
-public class UserSecurityModel : AsnType, ICloneable, IEquatable<UserSecurityModel>
+public class UserSecurityModel : AsnType, IEquatable<UserSecurityModel>
 {
     public override string ToString()
     {

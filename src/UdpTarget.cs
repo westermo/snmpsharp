@@ -84,6 +84,7 @@ public class UdpTarget : UdpTransport
     }
 
     /// <summary>Synchronously waits for <see cref="RequestAsync(Pdu, IAgentParameters, CancellationToken)"/>.</summary>
+    [Obsolete("Use RequestAsync; this synchronous wrapper blocks the calling thread.")]
     public SnmpPacket Request(Pdu pdu, IAgentParameters agentParameters) =>
         RequestAsync(pdu, agentParameters).GetAwaiter().GetResult();
 
@@ -250,6 +251,7 @@ public class UdpTarget : UdpTransport
     }
 
     /// <summary>Synchronously waits for <see cref="DiscoveryAsync"/>.</summary>
+    [Obsolete("Use DiscoveryAsync; this synchronous wrapper blocks the calling thread.")]
     public bool Discovery(SecureAgentParameters param) => DiscoveryAsync(param).GetAwaiter().GetResult();
 
     /// <summary>Discovers and updates the agent's SNMPv3 engine parameters.</summary>

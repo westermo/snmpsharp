@@ -28,7 +28,7 @@ namespace SnmpSharpNet;
 ///     Message flags field is a 1 byte <see cref="OctetString" /> encoded
 ///     field.
 /// </remarks>
-public class MsgFlags : AsnType, ICloneable
+public class MsgFlags : AsnType
 {
     /// <summary>
     ///     Bit value that, when set, indicates that packet has been authenticated.

@@ -21,7 +21,7 @@ namespace SnmpSharpNet;
 /// <summary>
 ///     Base class for all ASN.1 value classes
 /// </summary>
-public abstract class AsnType : ICloneable
+public abstract class AsnType
 {
     /// <summary>Bool true/false value type</summary>
     public const byte BOOLEAN = 0x01;

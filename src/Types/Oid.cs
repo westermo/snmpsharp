@@ -28,7 +28,7 @@ namespace SnmpSharpNet;
 ///     SMI Object Identifier type implementation.
 /// </summary>
 [Serializable]
-public sealed class Oid : AsnType, ICloneable, IComparable, IEnumerable<uint>,
+public sealed class Oid : AsnType, IComparable, IEnumerable<uint>,
     ISpanFormattable, IUtf8SpanFormattable, ISpanParsable<Oid>
 {
     /// <summary>Internal buffer</summary>

@@ -81,6 +81,7 @@ public class UdpTransport : IDisposable
     }
 
     /// <summary>Synchronously waits for <see cref="RequestAsync"/>.</summary>
+    [Obsolete("Use RequestAsync; this synchronous wrapper blocks the calling thread.")]
     public byte[] Request(IPAddress peer, int port, byte[] buffer, int bufferLength, int timeout, int retries)
     {
         ArgumentNullException.ThrowIfNull(buffer);

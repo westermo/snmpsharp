@@ -24,7 +24,7 @@ namespace SnmpSharpNet;
 ///     The Party Clock is currently
 ///     Obsolete, but included for backwards compatibility. Obsoleted in RFC 1902.
 /// </remarks>
-public class V2PartyClock : UInteger32, ICloneable
+public class V2PartyClock : UInteger32
 {
     /// <summary>Constructor</summary>
     public V2PartyClock()

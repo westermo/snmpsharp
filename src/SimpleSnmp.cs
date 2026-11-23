@@ -25,17 +25,11 @@ using System.Threading.Tasks;
 namespace SnmpSharpNet;
 
 /// <summary>
-///     Utility class to enable simplified access to SNMP version 1 and version 2 requests and replies.
+///     Utility class to simplify SNMP version 1, 2 and 3 requests.
 /// </summary>
 /// <remarks>
-///     Use this class if you are not looking for "deep" SNMP functionality. Design of the class is based
-///     around providing simplest possible access to SNMP operations without getting stack into details.
-///     If you are using the simplest way, you will leave SuppressExceptions flag to true and get all errors causing
-///     methods to return "null" result
-///     which will not tell you why operation failed. You can change the SuppressExceptions flag to false and catch any and
-///     all
-///     exception throwing errors.
-///     Either way, have fun.
+///     The legacy synchronous operations can suppress errors and return null. Async SNMP operations report failures
+///     as exceptions. Use <see cref="ResolveAsync"/> to check peer resolution separately.
 /// </remarks>
 public class SimpleSnmp
 {
@@ -271,61 +265,32 @@ public class SimpleSnmp
         }
     }
 
-    private SecureAgentParameters? DiscoverSecureAgentParameters()
-    {
-        if (_secparam != null)
-            return _secparam;
+    private SecureAgentParameters? DiscoverSecureAgentParameters() =>
+        _target is { } target
+            ? DiscoverSecureAgentParametersAsync(target, CancellationToken.None).GetAwaiter().GetResult()
+            : null;
 
-        _secparam = new SecureAgentParameters();
-        if (_target is null) return null;
-        if (!_target.Discovery(_secparam))
-        {
-            _secparam = null;
-            _target.Close();
-            _target = null;
-
-            return null;
-        }
-
-        if (_authDigests == AuthenticationDigests.None && _privProtocols == PrivacyProtocols.None)
-        {
-            _secparam.noAuthNoPriv(_securityName);
-        }
-        else
-        {
-            if (_privProtocols == PrivacyProtocols.None)
-                _secparam.authNoPriv(_securityName, _authDigests, _authSecret);
-            else
-                _secparam.authPriv(_securityName, _authDigests, _authSecret, _privProtocols, _privSecret);
-        }
-
-        _secparam.ContextName.Set(_contextName);
-
-        return _secparam;
-    }
-
-    private async Task<SecureAgentParameters?> DiscoverSecureAgentParametersAsync(
+    private async Task<SecureAgentParameters> DiscoverSecureAgentParametersAsync(UdpTarget target,
         CancellationToken cancellationToken)
     {
-        if (_secparam != null)
-            return _secparam;
+        if (_secparam is { EngineId.Length: > 0 } cachedParameters)
+            return cachedParameters;
 
-        _secparam = new SecureAgentParameters();
-        if (_target is null || !await _target.DiscoveryAsync(_secparam, cancellationToken).ConfigureAwait(false))
-        {
-            _secparam = null;
-            return null;
-        }
+        var parameters = new SecureAgentParameters();
+        if (!await target.DiscoveryAsync(parameters, cancellationToken).ConfigureAwait(false) ||
+            parameters.EngineId.Length == 0)
+            throw new SnmpException("SNMP version 3 discovery failed.");
 
         if (_authDigests == AuthenticationDigests.None && _privProtocols == PrivacyProtocols.None)
-            _secparam.noAuthNoPriv(_securityName);
+            parameters.noAuthNoPriv(_securityName);
         else if (_privProtocols == PrivacyProtocols.None)
-            _secparam.authNoPriv(_securityName, _authDigests, _authSecret);
+            parameters.authNoPriv(_securityName, _authDigests, _authSecret);
         else
-            _secparam.authPriv(_securityName, _authDigests, _authSecret, _privProtocols, _privSecret);
+            parameters.authPriv(_securityName, _authDigests, _authSecret, _privProtocols, _privSecret);
 
-        _secparam.ContextName.Set(_contextName);
-        return _secparam;
+        parameters.ContextName.Set(_contextName);
+        _secparam = parameters;
+        return parameters;
     }
 
     /// <summary>
@@ -360,6 +325,7 @@ public class SimpleSnmp
     /// <param name="version">SNMP protocol version.</param>
     /// <param name="pdu">Request Protocol Data Unit</param>
     /// <returns>Result of the SNMP request in a dictionary format with Oid => AsnType values</returns>
+    [Obsolete("Use GetAsync; this synchronous API blocks the calling thread.")]
     public Dictionary<Oid, AsnType>? Get(SnmpVersion version, Pdu pdu)
     {
         if (!ResolveOrThrow()) return null;
@@ -523,6 +489,7 @@ public class SimpleSnmp
     /// <param name="version">SNMP protocol version number.</param>
     /// <param name="oidList">List of request OIDs in string dotted decimal format.</param>
     /// <returns>Result of the SNMP request in a dictionary format with Oid => AsnType values</returns>
+    [Obsolete("Use GetAsync; this synchronous API blocks the calling thread.")]
     public Dictionary<Oid, AsnType>? Get(SnmpVersion version, string[] oidList)
     {
         switch (Valid)
@@ -575,6 +542,7 @@ public class SimpleSnmp
     /// <param name="version">SNMP protocol version.</param>
     /// <param name="pdu">Request Protocol Data Unit</param>
     /// <returns>Result of the SNMP request in a dictionary format with Oid => AsnType values</returns>
+    [Obsolete("Use GetNextAsync; this synchronous API blocks the calling thread.")]
     public Dictionary<Oid, AsnType>? GetNext(SnmpVersion version, Pdu pdu)
     {
         if (!ResolveOrThrow()) return null;
@@ -726,6 +694,7 @@ public class SimpleSnmp
     /// <param name="version">SNMP protocol version number.</param>
     /// <param name="oidList">List of request OIDs in string dotted decimal format.</param>
     /// <returns>Result of the SNMP request in a dictionary format with Oid => AsnType values</returns>
+    [Obsolete("Use GetNextAsync; this synchronous API blocks the calling thread.")]
     public Dictionary<Oid, AsnType>? GetNext(SnmpVersion version, string[] oidList)
     {
         switch (Valid)
@@ -795,6 +764,7 @@ public class SimpleSnmp
     /// <param name="pdu">Request Protocol Data Unit</param>
     /// <param name="version">SNMP protocol version number.</param>
     /// <returns>Result of the SNMP request in a dictionary format with Oid => AsnType values</returns>
+    [Obsolete("Use GetBulkAsync; this synchronous API blocks the calling thread.")]
     public Dictionary<Oid, AsnType>? GetBulk(Pdu pdu, SnmpVersion version = SnmpVersion.Ver2)
     {
         if (!ResolveOrThrow()) return null;
@@ -972,6 +942,7 @@ public class SimpleSnmp
     /// <param name="oidList">List of request OIDs in string dotted decimal format.</param>
     /// <param name="version">SNMP protocol version number.</param>
     /// <returns>Result of the SNMP request in a dictionary format with Oid => AsnType values</returns>
+    [Obsolete("Use GetBulkAsync; this synchronous API blocks the calling thread.")]
     public Dictionary<Oid, AsnType>? GetBulk(string[] oidList, SnmpVersion version = SnmpVersion.Ver2)
     {
         switch (Valid)
@@ -1023,6 +994,7 @@ public class SimpleSnmp
     /// <param name="version">SNMP protocol version number.</param>
     /// <param name="pdu">Request Protocol Data Unit</param>
     /// <returns>Result of the SNMP request in a dictionary format with Oid => AsnType values</returns>
+    [Obsolete("Use SetAsync; this synchronous API blocks the calling thread.")]
     public Dictionary<Oid, AsnType>? Set(SnmpVersion version, Pdu pdu)
     {
         if (!ResolveOrThrow()) return null;
@@ -1175,6 +1147,7 @@ public class SimpleSnmp
     /// <param name="version">SNMP protocol version number.</param>
     /// <param name="vbs">Vb array containing Oid/AsnValue pairs for the SET operation</param>
     /// <returns>Result of the SNMP request in a dictionary format with Oid => AsnType values</returns>
+    [Obsolete("Use SetAsync; this synchronous API blocks the calling thread.")]
     public Dictionary<Oid, AsnType>? Set(SnmpVersion version, Vb[] vbs)
     {
         if (!Valid)
@@ -1232,6 +1205,7 @@ public class SimpleSnmp
     ///     Oid => AsnType value mappings on success, empty dictionary if no data was found or
     ///     null on error
     /// </returns>
+    [Obsolete("Use WalkAsync; this synchronous API blocks the calling thread.")]
     public Dictionary<Oid, AsnType>? Walk(SnmpVersion version, string rootOid)
     {
         if (!Valid)
@@ -1305,59 +1279,49 @@ public class SimpleSnmp
     }
 
     /// <summary>Performs an SNMP GET request asynchronously.</summary>
-    public Task<Dictionary<Oid, AsnType>?> GetAsync(SnmpVersion version, Pdu pdu,
+    public Task<Dictionary<Oid, AsnType>> GetAsync(SnmpVersion version, Pdu pdu,
         CancellationToken cancellationToken = default) =>
         RequestDictionaryAsync(version, pdu, cancellationToken);
 
     /// <summary>Performs an SNMP GET request asynchronously for the specified OIDs.</summary>
-    public Task<Dictionary<Oid, AsnType>?> GetAsync(SnmpVersion version, string[] oidList,
+    public Task<Dictionary<Oid, AsnType>> GetAsync(SnmpVersion version, string[] oidList,
         CancellationToken cancellationToken = default) =>
         RequestDictionaryAsync(version, CreatePdu(PduType.Get, oidList), cancellationToken);
 
     /// <summary>Performs an SNMP GET-NEXT request asynchronously.</summary>
-    public Task<Dictionary<Oid, AsnType>?> GetNextAsync(SnmpVersion version, Pdu pdu,
+    public Task<Dictionary<Oid, AsnType>> GetNextAsync(SnmpVersion version, Pdu pdu,
         CancellationToken cancellationToken = default) =>
         RequestDictionaryAsync(version, pdu, cancellationToken);
 
     /// <summary>Performs an SNMP GET-NEXT request asynchronously for the specified OIDs.</summary>
-    public Task<Dictionary<Oid, AsnType>?> GetNextAsync(SnmpVersion version, string[] oidList,
+    public Task<Dictionary<Oid, AsnType>> GetNextAsync(SnmpVersion version, string[] oidList,
         CancellationToken cancellationToken = default) =>
         RequestDictionaryAsync(version, CreatePdu(PduType.GetNext, oidList), cancellationToken);
 
     /// <summary>Performs an SNMP GET-BULK request asynchronously.</summary>
-    public async Task<Dictionary<Oid, AsnType>?> GetBulkAsync(Pdu pdu, SnmpVersion version = SnmpVersion.Ver2,
+    public async Task<Dictionary<Oid, AsnType>> GetBulkAsync(Pdu pdu, SnmpVersion version = SnmpVersion.Ver2,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(pdu);
         if (version == SnmpVersion.Ver1)
-        {
-            if (!_suppressExceptions)
-                throw new SnmpInvalidVersionException("GetBulk request not support SNMP version 1.");
-            return null;
-        }
+            throw new SnmpInvalidVersionException("GetBulk request not support SNMP version 1.");
 
-        pdu.NonRepeaters = _nonRepeaters;
-        pdu.MaxRepetitions = _maxRepetitions;
+        ApplyBulkOptions(pdu);
         return await RequestDictionaryAsync(version, pdu, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Performs an SNMP GET-BULK request asynchronously for the specified OIDs.</summary>
-    public Task<Dictionary<Oid, AsnType>?> GetBulkAsync(string[] oidList, SnmpVersion version = SnmpVersion.Ver2,
-        CancellationToken cancellationToken = default)
-    {
-        var pdu = CreatePdu(PduType.GetBulk, oidList);
-        pdu.NonRepeaters = _nonRepeaters;
-        pdu.MaxRepetitions = _maxRepetitions;
-        return GetBulkAsync(pdu, version, cancellationToken);
-    }
+    public Task<Dictionary<Oid, AsnType>> GetBulkAsync(string[] oidList, SnmpVersion version = SnmpVersion.Ver2,
+        CancellationToken cancellationToken = default) =>
+        GetBulkAsync(CreatePdu(PduType.GetBulk, oidList), version, cancellationToken);
 
     /// <summary>Performs an SNMP SET request asynchronously.</summary>
-    public Task<Dictionary<Oid, AsnType>?> SetAsync(SnmpVersion version, Pdu pdu,
+    public Task<Dictionary<Oid, AsnType>> SetAsync(SnmpVersion version, Pdu pdu,
         CancellationToken cancellationToken = default) =>
         RequestDictionaryAsync(version, pdu, cancellationToken);
 
     /// <summary>Performs an SNMP SET request asynchronously for the specified variable bindings.</summary>
-    public Task<Dictionary<Oid, AsnType>?> SetAsync(SnmpVersion version, Vb[] variableBindings,
+    public Task<Dictionary<Oid, AsnType>> SetAsync(SnmpVersion version, Vb[] variableBindings,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(variableBindings);
@@ -1368,68 +1332,77 @@ public class SimpleSnmp
     }
 
     /// <summary>Walks an OID subtree asynchronously, yielding each returned binding as it arrives.</summary>
+    /// <remarks>The walk ends normally at the subtree boundary or the end of the MIB.</remarks>
+    /// <exception cref="SnmpException">The agent returned a non-increasing OID.</exception>
     public async IAsyncEnumerable<KeyValuePair<Oid, AsnType>> WalkAsync(SnmpVersion version, string rootOid,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(rootOid);
-        if (!Valid || rootOid.Length < 2)
-        {
-            if (!_suppressExceptions)
-            {
-                if (!Valid)
-                    throw new SnmpException("SimpleSnmp class is not valid.");
-                throw new SnmpException(SnmpException.InvalidOid, "RootOid is not a valid Oid");
-            }
-            yield break;
-        }
+        if (!Valid)
+            throw new SnmpException("SimpleSnmp class is not valid.");
+        if (rootOid.Length < 2)
+            throw new SnmpException(SnmpException.InvalidOid, "RootOid is not a valid Oid");
 
-        Oid root;
-        try
-        {
-            root = new Oid(rootOid);
-        }
-        catch when (_suppressExceptions)
-        {
-            yield break;
-        }
+        var root = new Oid(rootOid);
 
         if (root.Length <= 0)
-        {
-            if (!_suppressExceptions)
-                throw new SnmpException(SnmpException.InvalidOid, "RootOid is not a valid Oid");
-            yield break;
-        }
+            throw new SnmpException(SnmpException.InvalidOid, "RootOid is not a valid Oid");
 
-        var lastOid = (Oid)root.Clone();
-        while (root.IsRootOf(lastOid))
+        var lastOid = root;
+        var requestType = version == SnmpVersion.Ver1 ? PduType.GetNext : PduType.GetBulk;
+        while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var response = version == SnmpVersion.Ver1
-                ? await GetNextAsync(version, [lastOid.ToString()], cancellationToken).ConfigureAwait(false)
-                : await GetBulkAsync([lastOid.ToString()], version, cancellationToken).ConfigureAwait(false);
-            if (response is null || response.Count == 0)
+            var request = new Pdu(requestType);
+            request.VbList.Add(lastOid);
+            if (requestType == PduType.GetBulk)
+                ApplyBulkOptions(request);
+
+            var packet = await SendRequestAsync(version, request, cancellationToken).ConfigureAwait(false);
+            var response = packet.Pdu;
+            // SNMPv1 GETNEXT signals the end of the MIB with noSuchName for the requested binding.
+            if (version == SnmpVersion.Ver1 && response.ErrorStatus == SnmpConstants.ErrNoSuchName &&
+                response.ErrorIndex == 1)
                 yield break;
+            ThrowIfAgentError(response);
 
             var advanced = false;
-            foreach (var entry in response)
+            foreach (var binding in response.VbList)
             {
-                if (!root.IsRootOf(entry.Key))
+                if (binding.Oid is not { } oid || binding.Value is not { } value)
+                    continue;
+                if (IsTraversalEnd(value, version, requestType) || !root.IsRootOf(oid))
                     yield break;
-                if (entry.Key.CompareTo(lastOid) <= 0)
-                {
-                    if (!_suppressExceptions)
-                        throw new SnmpException("Agent returned a non-increasing OID during a walk.");
-                    yield break;
-                }
+                if (oid.CompareTo(lastOid) <= 0)
+                    throw new SnmpException("Agent returned a non-increasing OID during a walk.");
 
-                yield return entry;
-                lastOid = (Oid)entry.Key.Clone();
+                lastOid = new Oid(oid);
                 advanced = true;
+                yield return new KeyValuePair<Oid, AsnType>(oid, value);
             }
 
             if (!advanced)
                 yield break;
         }
+    }
+
+    private void ApplyBulkOptions(Pdu pdu)
+    {
+        pdu.NonRepeaters = _nonRepeaters;
+        pdu.MaxRepetitions = _maxRepetitions;
+    }
+
+    private static bool IsTraversalEnd(AsnType value, SnmpVersion version, PduType requestType) =>
+        (requestType is PduType.GetNext or PduType.GetBulk) &&
+        (value.Type is SnmpConstants.SMI_NOSUCHINSTANCE or SnmpConstants.SMI_NOSUCHOBJECT ||
+         value.Type == SnmpConstants.SMI_ENDOFMIBVIEW &&
+         (requestType == PduType.GetBulk || version is SnmpVersion.Ver2 or SnmpVersion.Ver3));
+
+    private static void ThrowIfAgentError(Pdu response)
+    {
+        if (response.ErrorStatus != 0)
+            throw new SnmpErrorStatusException("Agent responded with an error", response.ErrorStatus,
+                response.ErrorIndex);
     }
 
     private static Pdu CreatePdu(PduType type, string[] oidList)
@@ -1441,132 +1414,79 @@ public class SimpleSnmp
         return pdu;
     }
 
-    private async Task<Dictionary<Oid, AsnType>?> RequestDictionaryAsync(SnmpVersion version, Pdu pdu,
+    private async Task<Dictionary<Oid, AsnType>> RequestDictionaryAsync(SnmpVersion version, Pdu pdu,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(pdu);
         var packet = await SendRequestAsync(version, pdu, cancellationToken).ConfigureAwait(false);
-        if (packet is null)
-            return null;
+        ThrowIfAgentError(packet.Pdu);
 
-        if (packet.Pdu.ErrorStatus != 0)
+        var result = new Dictionary<Oid, AsnType>();
+        foreach (var vb in packet.Pdu.VbList)
         {
-            if (!_suppressExceptions)
-                throw new SnmpErrorStatusException("Agent responded with an error", packet.Pdu.ErrorStatus,
-                    packet.Pdu.ErrorIndex);
-            return null;
-        }
+            if (vb.Oid is null || vb.Value is null)
+                continue;
 
-        try
-        {
-            var result = new Dictionary<Oid, AsnType>();
-            foreach (var vb in packet.Pdu.VbList)
+            if (pdu.Type == PduType.Get &&
+                (version is SnmpVersion.Ver2 or SnmpVersion.Ver3) &&
+                (vb.Value.Type is SnmpConstants.SMI_NOSUCHINSTANCE or SnmpConstants.SMI_NOSUCHOBJECT))
             {
-                if (vb.Oid is null || vb.Value is null)
-                    continue;
-
-                if (pdu.Type == PduType.Get &&
-                    (version is SnmpVersion.Ver2 or SnmpVersion.Ver3) &&
-                    (vb.Value.Type is SnmpConstants.SMI_NOSUCHINSTANCE or SnmpConstants.SMI_NOSUCHOBJECT))
-                {
-                    if (!result.ContainsKey(vb.Oid))
-                        result.Add(vb.Oid, new Null());
-                    else
-                        result.Add(Oid.NullOid(), vb.Value);
-                    continue;
-                }
-
-                var isEndOfMib = vb.Value.Type == SnmpConstants.SMI_ENDOFMIBVIEW &&
-                                 (pdu.Type != PduType.GetNext || version is SnmpVersion.Ver2 or SnmpVersion.Ver3);
-                var isMissing =
-                    vb.Value.Type is SnmpConstants.SMI_NOSUCHINSTANCE or SnmpConstants.SMI_NOSUCHOBJECT;
-                if ((pdu.Type == PduType.GetNext || pdu.Type == PduType.GetBulk) &&
-                    (isEndOfMib || isMissing))
-                    break;
-
-                if (result.TryGetValue(vb.Oid, out var previous))
-                {
-                    if (previous.Type != vb.Value.Type)
-                        throw new SnmpException(SnmpException.OidValueTypeChanged,
-                            $"Value type changed from {previous.Type} to {vb.Value.Type}");
-                    result[vb.Oid] = vb.Value;
-                }
+                if (!result.ContainsKey(vb.Oid))
+                    result.Add(vb.Oid, new Null());
                 else
-                {
-                    result.Add(vb.Oid, vb.Value);
-                }
+                    result.Add(Oid.NullOid(), vb.Value);
+                continue;
             }
 
-            return result;
+            if (IsTraversalEnd(vb.Value, version, pdu.Type))
+                break;
+
+            if (result.TryGetValue(vb.Oid, out var previous))
+            {
+                if (previous.Type != vb.Value.Type)
+                    throw new SnmpException(SnmpException.OidValueTypeChanged,
+                        $"Value type changed from {previous.Type} to {vb.Value.Type}");
+                result[vb.Oid] = vb.Value;
+            }
+            else
+            {
+                result.Add(vb.Oid, vb.Value);
+            }
         }
-        catch when (_suppressExceptions)
-        {
-            return null;
-        }
+
+        return result;
     }
 
-    private async Task<SnmpPacket?> SendRequestAsync(SnmpVersion version, Pdu pdu,
+    private async Task<SnmpPacket> SendRequestAsync(SnmpVersion version, Pdu pdu,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (!Valid)
+            throw new SnmpException("SimpleSnmp class is not valid.");
+
+        if (!await ResolvePeerAddressAsync(cancellationToken).ConfigureAwait(false))
+            throw new SnmpException("Unable to resolve the SNMP agent address.");
+
+        using var target = new UdpTarget(_peerIP, _peerPort, _timeout, _retry);
+        IAgentParameters parameters = version == SnmpVersion.Ver3
+            ? await DiscoverSecureAgentParametersAsync(target, cancellationToken).ConfigureAwait(false)
+            : new AgentParameters(version, new OctetString(_community));
+
+        var result = await target.RequestAsync(pdu, parameters, cancellationToken).ConfigureAwait(false);
+        if (result is SnmpV3Packet { Pdu.Type: PduType.Report, Pdu.VbCount: > 0 } &&
+            parameters is SecureAgentParameters { EngineId.Length: > 0 } &&
+            result.Pdu.VbList[0].Oid?.Equals(SnmpConstants.usmStatsNotInTimeWindows) == true)
+            result = await target.RequestAsync(pdu, parameters, cancellationToken).ConfigureAwait(false);
+
+        if (result is SnmpV3Packet { Pdu.Type: PduType.Report } report)
         {
-            if (!_suppressExceptions)
-                throw new SnmpException("SimpleSnmp class is not valid.");
-            return null;
+            var reason = SNMPV3ReportError.TranslateError(report);
+            throw new SnmpException(reason.Length == 0
+                ? "Agent returned an SNMPv3 report instead of a response."
+                : $"Agent returned an SNMPv3 report: {reason}");
         }
 
-        if (!await ResolveAsync(cancellationToken).ConfigureAwait(false))
-        {
-            if (!_suppressExceptions)
-                throw new SnmpException("Unable to resolve the SNMP agent address.");
-            return null;
-        }
-
-        UdpTarget target;
-        try
-        {
-            target = new UdpTarget(_peerIP, _peerPort, _timeout, _retry);
-        }
-        catch when (_suppressExceptions)
-        {
-            return null;
-        }
-
-        _target = target;
-        try
-        {
-            IAgentParameters? parameters = version == SnmpVersion.Ver3
-                ? await DiscoverSecureAgentParametersAsync(cancellationToken).ConfigureAwait(false)
-                : new AgentParameters(version, new OctetString(_community));
-            if (parameters is null)
-            {
-                if (!_suppressExceptions)
-                    throw new SnmpException("SNMP version 3 discovery failed.");
-                return null;
-            }
-
-            var result = await target.RequestAsync(pdu, parameters, cancellationToken).ConfigureAwait(false);
-            if (version == SnmpVersion.Ver3 && result.Pdu.Type == PduType.Report &&
-                result.Pdu.VbCount > 0 &&
-                result.Pdu.VbList[0].Oid?.Equals(SnmpConstants.usmStatsNotInTimeWindows) == true)
-                result = await target.RequestAsync(pdu, _secparam!, cancellationToken).ConfigureAwait(false);
-            return result;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch when (_suppressExceptions)
-        {
-            return null;
-        }
-        finally
-        {
-            target.Close();
-            if (ReferenceEquals(_target, target))
-                _target = null;
-        }
+        return result;
     }
 
     #region Properties
@@ -1659,23 +1579,23 @@ public class SimpleSnmp
 
     #region Utility functions
 
-    /// <summary>
-    ///     Resolve peer name to an IP address
-    /// </summary>
-    /// <remarks>
-    ///     This method will not throw any exceptions, even on failed DNS resolution. Make
-    ///     sure you call SimpleSnmp.Valid property to verify class state.
-    /// </remarks>
-    /// <returns>true if DNS resolution is successful, otherwise false</returns>
-    internal bool Resolve()
-    {
-        return ResolveAsync().GetAwaiter().GetResult();
-    }
-
     /// <summary>Resolves the configured peer name asynchronously.</summary>
     /// <param name="cancellationToken">Cancels DNS resolution.</param>
-    /// <returns>True when the peer name resolves to a usable address.</returns>
+    /// <returns>True when the peer name resolves to a usable address; false for invalid or unresolved names.</returns>
+    /// <exception cref="OperationCanceledException">The caller canceled resolution.</exception>
     public async Task<bool> ResolveAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await ResolvePeerAddressAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is SocketException or ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    private async Task<bool> ResolvePeerAddressAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (_peerIP is not null && !_peerIP.Equals(IPAddress.None) && !_peerIP.Equals(IPAddress.Any))
@@ -1689,52 +1609,38 @@ public class SimpleSnmp
             return !_peerIP.Equals(IPAddress.None) && !_peerIP.Equals(IPAddress.Any);
         }
 
-        try
-        {
-            var addresses = await Dns.GetHostAddressesAsync(_peerName, cancellationToken).ConfigureAwait(false);
-            foreach (var address in addresses)
-                if (address.AddressFamily == AddressFamily.InterNetwork)
-                {
-                    _peerIP = address;
-                    return true;
-                }
-
-            if (addresses.Length > 0)
+        _peerIP = IPAddress.None;
+        var addresses = await Dns.GetHostAddressesAsync(_peerName, cancellationToken).ConfigureAwait(false);
+        foreach (var address in addresses)
+            if (address.AddressFamily == AddressFamily.InterNetwork)
             {
-                _peerIP = addresses[0];
+                _peerIP = address;
                 return true;
             }
 
-            _peerIP = IPAddress.None;
-            return false;
-        }
-        catch (OperationCanceledException)
+        if (addresses.Length > 0)
         {
-            throw;
+            _peerIP = addresses[0];
+            return true;
         }
-        catch
-        {
-            _peerIP = IPAddress.None;
-            if (!_suppressExceptions)
-                throw;
-            return false;
-        }
+
+        return false;
     }
 
     private bool ResolveOrThrow()
     {
-        if (Resolve())
+        if (_suppressExceptions)
+            return ResolveAsync().GetAwaiter().GetResult();
+        if (ResolvePeerAddressAsync(CancellationToken.None).GetAwaiter().GetResult())
             return true;
-        if (!_suppressExceptions)
-            throw new SnmpException("Unable to resolve the SNMP agent address.");
-        return false;
+        throw new SnmpException("Unable to resolve the SNMP agent address.");
     }
 
     /// <summary>
-    ///     Get/Set exception suppression flag.
-    ///     If exceptions are suppressed all methods return null on any and all errors. With suppression disabled, you can
-    ///     capture error details in try/catch blocks around method calls.
+    ///     Legacy exception suppression flag for synchronous operations. Async SNMP operations report failures
+    ///     as exceptions regardless of this setting.
     /// </summary>
+    [Obsolete("Async SNMP operations report failures as exceptions; use try/catch instead.")]
     public bool SuppressExceptions
     {
         get => _suppressExceptions;

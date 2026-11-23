@@ -19,9 +19,7 @@ using System;
 namespace SnmpSharpNet;
 
 /// <summary>
-///     Exception thrown by <see cref="SimpleSnmp" /> methods when SNMP request returned a SnmpStatus error in the reply
-///     and
-///     SuppressExceptions flag is set to false.
+///     The agent reported an error in response to a <see cref="SimpleSnmp" /> operation.
 /// </summary>
 public class SnmpErrorStatusException : Exception
 {

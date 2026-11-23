@@ -28,7 +28,7 @@ namespace SnmpSharpNet;
 ///     roll over to 0.
 /// </remarks>
 [Serializable]
-public class Counter64 : AsnType, IComparable<ulong>, IComparable<Counter64>, ICloneable,
+public class Counter64 : AsnType, IComparable<ulong>, IComparable<Counter64>,
     ISpanFormattable, IUtf8SpanFormattable, ISpanParsable<Counter64>
 {
     /// <summary>

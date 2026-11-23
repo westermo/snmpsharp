@@ -113,6 +113,7 @@ public class TrapAgent : IDisposable, IAsyncDisposable
     /// <param name="packet">SNMP v1 Trap packet class</param>
     /// <param name="peer">Manager (receiver) IP address</param>
     /// <param name="port">Manager (receiver) UDP port number</param>
+    [Obsolete("Use SendV1TrapAsync; this synchronous wrapper blocks the calling thread.")]
     public void SendV1Trap(SnmpV1TrapPacket packet, IpAddress peer, int port)
     {
         SendV1TrapAsync(packet, peer, port).GetAwaiter().GetResult();
@@ -147,6 +148,7 @@ public class TrapAgent : IDisposable, IAsyncDisposable
     /// <param name="specificTrap">Specific trap code</param>
     /// <param name="senderUpTime">Senders sysUpTime</param>
     /// <param name="varList">Variable binding list</param>
+    [Obsolete("Use SendV1TrapAsync; this synchronous wrapper blocks the calling thread.")]
     public void SendV1Trap(IpAddress receiver, int receiverPort, string community, Oid senderSysObjectID,
         IpAddress senderIpAdress, int genericTrap, int specificTrap, uint senderUpTime,
         VbCollection varList)
@@ -181,6 +183,7 @@ public class TrapAgent : IDisposable, IAsyncDisposable
     /// <param name="packet">SNMP v2 Trap packet class</param>
     /// <param name="peer">Manager (receiver) IP address</param>
     /// <param name="port">Manager (receiver) UDP port number</param>
+    [Obsolete("Use SendV2TrapAsync; this synchronous wrapper blocks the calling thread.")]
     public void SendV2Trap(SnmpV2Packet packet, IpAddress peer, int port)
     {
         SendV2TrapAsync(packet, peer, port).GetAwaiter().GetResult();
@@ -216,6 +219,7 @@ public class TrapAgent : IDisposable, IAsyncDisposable
     /// <param name="senderUpTime">Sender sysUpTime</param>
     /// <param name="trapObjectID">Trap ObjectID</param>
     /// <param name="varList">Variable binding list</param>
+    [Obsolete("Use SendV2TrapAsync; this synchronous wrapper blocks the calling thread.")]
     public void SendV2Trap(IpAddress receiver, int receiverPort, string community, uint senderUpTime,
         Oid trapObjectID, VbCollection varList)
     {
@@ -249,6 +253,7 @@ public class TrapAgent : IDisposable, IAsyncDisposable
     /// <param name="packet">SNMP v3 Trap packet class</param>
     /// <param name="peer">Manager (receiver) IP address</param>
     /// <param name="port">Manager (receiver) UDP port number</param>
+    [Obsolete("Use SendV3TrapAsync; this synchronous wrapper blocks the calling thread.")]
     public void SendV3Trap(SnmpV3Packet packet, IpAddress peer, int port)
     {
         SendV3TrapAsync(packet, peer, port).GetAwaiter().GetResult();
@@ -287,6 +292,7 @@ public class TrapAgent : IDisposable, IAsyncDisposable
     /// <param name="senderUpTime">Sender upTime</param>
     /// <param name="trapObjectID">Trap object ID</param>
     /// <param name="varList">Variable binding list</param>
+    [Obsolete("Use SendV3TrapAsync; this synchronous wrapper blocks the calling thread.")]
     public void SendV3Trap(IpAddress receiver, int receiverPort, byte[] engineId, int senderEngineBoots,
         int senderEngineTime, string senderUserName, uint senderUpTime, Oid trapObjectID, VbCollection varList)
     {
@@ -333,6 +339,7 @@ public class TrapAgent : IDisposable, IAsyncDisposable
     ///     available digests
     /// </param>
     /// <param name="authSecret">Authentication secret</param>
+    [Obsolete("Use SendV3TrapAsync; this synchronous wrapper blocks the calling thread.")]
     public void SendV3Trap(IpAddress receiver, int receiverPort, byte[] engineId, int senderEngineBoots,
         int senderEngineTime, string senderUserName, uint senderUpTime, Oid trapObjectID, VbCollection varList,
         AuthenticationDigests authDigest, byte[] authSecret)
@@ -385,6 +392,7 @@ public class TrapAgent : IDisposable, IAsyncDisposable
     ///     available privacy protocols.
     /// </param>
     /// <param name="privSecret">Privacy secret</param>
+    [Obsolete("Use SendV3TrapAsync; this synchronous wrapper blocks the calling thread.")]
     public void SendV3Trap(IpAddress receiver, int receiverPort, byte[] engineId, int senderEngineBoots,
         int senderEngineTime, string senderUserName, uint senderUpTime, Oid trapObjectID, VbCollection varList,
         AuthenticationDigests authDigest, byte[] authSecret, PrivacyProtocols privProtocol, byte[] privSecret)
@@ -430,6 +438,7 @@ public class TrapAgent : IDisposable, IAsyncDisposable
     /// <param name="packet">SNMP trap packet</param>
     /// <param name="peer">Manager (receiver) IP address</param>
     /// <param name="port">Manager (receiver) UDP port number</param>
+    [Obsolete("Use SendTrapAsync; this synchronous wrapper blocks the calling thread.")]
     public static void SendTrap(SnmpPacket packet, IpAddress peer, int port)
     {
         SendTrapAsync(packet, peer, port).GetAwaiter().GetResult();

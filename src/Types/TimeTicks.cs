@@ -26,7 +26,7 @@ namespace SnmpSharpNet;
 ///     32-bit integer representing device uptime in 1/100s of a second time periods.
 /// </remarks>
 [Serializable]
-public class TimeTicks : UInteger32, ICloneable, ISpanParsable<TimeTicks>
+public class TimeTicks : UInteger32, ISpanParsable<TimeTicks>
 {
     /// <summary>Constructor</summary>
     public TimeTicks()

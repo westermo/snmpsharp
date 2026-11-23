@@ -141,6 +141,7 @@ public sealed class IpAddress : OctetString, IComparable, ISpanParsable<IpAddres
     ///     in <see cref="IpAddress.Set(string)" /> method for details.
     /// </summary>
     /// <param name="inetAddr">IP address encoded as a string or host name</param>
+    [Obsolete("Use Parse for IPv4 literals, or create an IpAddress and call SetAsync for host names.")]
     public IpAddress(string inetAddr) : this()
     {
         Set(inetAddr);
@@ -247,7 +248,8 @@ public sealed class IpAddress : OctetString, IComparable, ISpanParsable<IpAddres
     ///     Class value will be set with the parsed dotted decimal IP address in the parameter or
     ///     if string parameter does not represent an IP address, DNS resolution
     ///     will be performed.
-    ///     Synchronously resolves host names. Use <see cref="SetAsync"/> in asynchronous applications.
+    ///     Host name resolution blocks the caller, including through the <see cref="OctetString.Set(string)"/>
+    ///     virtual method. Use <see cref="SetAsync"/> for asynchronous resolution.
     /// </remarks>
     /// <param name="value">IP address encoded as a string or host name</param>
     /// <exception cref="ArgumentException">Thrown when DNS resolution of the parameter value has failed.</exception>

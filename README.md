@@ -32,9 +32,10 @@ The callback delegates and `AsyncRequestResult` have been removed; send, receive
 validation failures now propagate as exceptions. SNMPv3 validation failures throw rather than returning null.
 
 `UdpTransport.RequestAsync(peer, port, ReadOnlyMemory<byte>, timeout, retries, cancellationToken)`
-provides the raw datagram API. Synchronous `Request` and `Discovery` remain as blocking wrappers over the
-same implementation. A target allows one transport request at a time; overlapping sync/async requests throw
-`InvalidOperationException`. Do not modify request data, security parameters or target settings during a request.
+provides the raw datagram API. Synchronous `Request` and `Discovery` are obsolete blocking wrappers.
+A target allows one transport request at a time; overlapping sync/async requests throw
+`InvalidOperationException`. Do not modify request data, security parameters or target settings
+during a request.
 
 The timeout covers each send/receive attempt; `retries: 0` sends once. Zero or -1 disables the timeout.
 Exhausting attempts throws `SnmpException` with `ErrorCode == SnmpException.RequestTimedOut`.
@@ -45,18 +46,32 @@ or cancellation. Replies from other IP addresses/ports are ignored within the at
 request ID using the same rules as synchronous requests.
 
 `SimpleSnmp` also exposes `GetAsync`, `GetNextAsync`, `GetBulkAsync`, `SetAsync` and
-`WalkAsync`; the walk streams bindings as they arrive. String-host constructors defer DNS
-lookup until a request, where it is performed asynchronously. `ResolveAsync` can resolve
-the peer explicitly. `IpAddress.SetAsync` provides asynchronous IPv4 hostname resolution
-for SNMP `IpAddress` values.
+`WalkAsync`. The request methods return non-null dictionaries on success and report failures as
+exceptions. A walk streams ordered bindings and completes normally when it leaves the subtree
+or reaches the end of the MIB, including with SNMPv1. String-host constructors defer DNS
+lookup until a request, where resolution errors propagate. `ResolveAsync` checks the peer
+explicitly and returns `false` for invalid or unresolved names; cancellation still throws.
 
 `TrapAgent` provides async send methods, implements `IDisposable` and `IAsyncDisposable`,
 and its `IPAddress` overloads support both IPv4 and IPv6 destinations. The static
 `TrapAgent.SendTrapAsync` helper disposes its socket after sending. Existing synchronous
-methods remain blocking wrappers.
+send methods remain as obsolete blocking wrappers.
 
 SNMP privacy salts are now initialized with cryptographic randomness, and generated
 request IDs no longer use time-seeded `Random` instances.
+
+### Migrating legacy APIs
+
+- Replace `Snmp` with `UdpTransport` for raw datagrams. Replace `CTarget`, `UTarget`, and
+  `ITarget` with `UdpTarget` plus `AgentParameters` for SNMPv1/v2c or
+  `SecureAgentParameters` for SNMPv3.
+- Replace obsolete synchronous `SimpleSnmp` operations with their async counterparts.
+  `SuppressExceptions` affects only the legacy synchronous operations.
+- ASN.1 values no longer implement `ICloneable`. Call `Clone()` on the `AsnType` or
+  concrete value directly; the return type is still `object`.
+- Replace `new IpAddress(string)` with `IpAddress.Parse` for IPv4 literals, or create an
+  `IpAddress` and call `SetAsync` for host names. `IpAddress.Set(string)` remains a virtual
+  override and can block on DNS, even when called through an `OctetString` reference.
 
 ## Diagnostics
 
@@ -84,7 +99,7 @@ OctetString s = "public";          string text = s;     // non-printable data yi
 OctetString b = new byte[] { 1 };  byte[] bytes = b;
 Oid oid = "1.3.6.1.2.1.1";         string dotted = oid;
 Oid fromIds = new uint[] { 1, 3 }; uint[] ids = oid;    // returns a copy
-IPAddress addr = new IpAddress("10.0.0.1");
+IPAddress addr = IpAddress.Parse("10.0.0.1", provider: null);
 var ip = (IpAddress)IPAddress.Loopback;                 // throws OverflowException for IPv6
 var ticks = (TimeTicks)TimeSpan.FromSeconds(5);         // throws OverflowException if out of range
 ```

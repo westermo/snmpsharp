@@ -29,7 +29,7 @@ namespace SnmpSharpNet;
 ///     exits now or may be defined in the future.
 /// </remarks>
 [Serializable]
-public class Integer32 : AsnType, IComparable<Integer32>, IComparable<int>, ICloneable,
+public class Integer32 : AsnType, IComparable<Integer32>, IComparable<int>,
     ISpanFormattable, IUtf8SpanFormattable, ISpanParsable<Integer32>
 {
     /// <summary>Internal class value</summary>

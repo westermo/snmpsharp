@@ -28,7 +28,7 @@ namespace SnmpSharpNet;
 /// <summary>ASN.1 OctetString type implementation</summary>
 [Serializable]
 [SuppressMessage("ReSharper", "VirtualMemberCallInConstructor")]
-public class OctetString : AsnType, ICloneable, IComparable<byte[]>, IComparable<OctetString>, IEnumerable<byte>,
+public class OctetString : AsnType, IComparable<byte[]>, IComparable<OctetString>, IEnumerable<byte>,
     ISpanFormattable, IUtf8SpanFormattable, ISpanParsable<OctetString>
 {
     /// <summary>Data buffer</summary>

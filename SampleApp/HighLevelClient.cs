@@ -7,7 +7,7 @@ public class HighLevelSnmpClient(UdpTarget target, IAgentParameters parameters, 
 {
     private const int SnmpTimeout = 4000;
 
-    public AsnType QuerySingleValueAsync(Oid oid)
+    public async Task<AsnType> QuerySingleValueAsync(Oid oid)
     {
         var pdu = new Pdu(PduType.Get)
         {
@@ -16,15 +16,10 @@ public class HighLevelSnmpClient(UdpTarget target, IAgentParameters parameters, 
 
         pdu.VbList.Add(oid);
 
-        SnmpPacket? result;
+        SnmpPacket result;
         try
         {
-            result = target.Request(pdu, parameters);
-            if (result == null)
-            {
-                logger?.LogWarning("Unintelligible SNMP packet returned from {Address}", target.Address);
-                throw new IOException($"Unrecognized SNMP packet received from {target.Address}");
-            }
+            result = await target.RequestAsync(pdu, parameters).ConfigureAwait(false);
         }
         catch (Exception e)
         {
@@ -48,7 +43,7 @@ public class HighLevelSnmpClient(UdpTarget target, IAgentParameters parameters, 
         return result.Pdu.VbList.Single().Value!;
     }
 
-    public Vb[] QueryMultipleValues(params IEnumerable<Oid> oids)
+    public async Task<Vb[]> QueryMultipleValuesAsync(params IEnumerable<Oid> oids)
     {
         var pdu = new Pdu(PduType.Get)
         {
@@ -59,16 +54,11 @@ public class HighLevelSnmpClient(UdpTarget target, IAgentParameters parameters, 
             pdu.VbList.Add(oid);
         }
 
-        SnmpPacket? result;
+        SnmpPacket result;
         var start = DateTime.UtcNow;
         try
         {
-            result = target.Request(pdu, parameters);
-            if (result == null)
-            {
-                logger?.LogWarning("Unintelligible SNMP packet returned from {Address}", target.Address);
-                throw new IOException($"Unrecognized SNMP packet received from {target.Address}");
-            }
+            result = await target.RequestAsync(pdu, parameters).ConfigureAwait(false);
         }
         catch (OperationCanceledException ex)
         {
@@ -121,7 +111,7 @@ public class HighLevelSnmpClient(UdpTarget target, IAgentParameters parameters, 
             snmpPacket.Pdu.ErrorStatus == 0 ? "Good" : "Bad", pdu, snmpPacket);
     }
 
-    public IDictionary<Oid, AsnType?> WalkTree(Oid oid)
+    public async Task<IDictionary<Oid, AsnType?>> WalkTreeAsync(Oid oid)
     {
         var treeData = new Dictionary<Oid, AsnType?>();
         var rootOid = oid;
@@ -141,23 +131,16 @@ public class HighLevelSnmpClient(UdpTarget target, IAgentParameters parameters, 
             pdu.VbList.Add(lastOid);
 
             // Make SNMP request
-            SnmpPacket? result;
+            SnmpPacket result;
             try
             {
-                result = target.Request(pdu, parameters);
+                result = await target.RequestAsync(pdu, parameters).ConfigureAwait(false);
             }
             catch (Exception e)
             {
                 logger?.LogDebug("SNMP request failed for {Root} on {Address}: {ErrorMessage}", rootOid, target.Address,
                     e.Message);
                 throw;
-            }
-
-            // If result is null then agent didn't reply or we couldn't parse the reply.
-            if (result == null)
-            {
-                logger?.LogWarning("No response received from SNMP agent.");
-                break;
             }
 
             // ErrorStatus other then 0 is an error returned by 
