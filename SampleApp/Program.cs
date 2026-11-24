@@ -10,7 +10,7 @@ var logger = factory.CreateLogger<HighLevelSnmpClient>();
 using var target = new UdpTarget(IPAddress.Parse(args[0]), 161, 2000, 1);
 var parameters = new AgentParameters(SnmpVersion.Ver2, new OctetString("public"));
 var client = new HighLevelSnmpClient(target, parameters, logger);
-var result = client.WalkTree(new Oid("1"));
+var result = await client.WalkTreeAsync(new Oid("1"));
 foreach (var pair in result)
 {
     Console.WriteLine($"{pair.Key} => {pair.Value}");

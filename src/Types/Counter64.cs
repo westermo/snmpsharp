@@ -15,6 +15,7 @@
 // 
 
 using System;
+using System.Buffers.Binary;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 
@@ -27,7 +28,8 @@ namespace SnmpSharpNet;
 ///     roll over to 0.
 /// </remarks>
 [Serializable]
-public class Counter64 : AsnType, IComparable<ulong>, IComparable<Counter64>, ICloneable
+public class Counter64 : AsnType, IComparable<ulong>, IComparable<Counter64>,
+    ISpanFormattable, IUtf8SpanFormattable, ISpanParsable<Counter64>
 {
     /// <summary>
     ///     Internal 64-bit unsigned integer value.
@@ -204,6 +206,53 @@ public class Counter64 : AsnType, IComparable<ulong>, IComparable<Counter64>, IC
     public override string ToString()
     {
         return Value.ToString(CultureInfo.CurrentCulture);
+    }
+
+    public string ToString(string? format, IFormatProvider? formatProvider) =>
+        Value.ToString(format, formatProvider);
+
+    public bool TryFormat(
+        Span<char> destination,
+        out int charsWritten,
+        ReadOnlySpan<char> format,
+        IFormatProvider? provider) =>
+        Value.TryFormat(destination, out charsWritten, format, provider);
+
+    public bool TryFormat(
+        Span<byte> utf8Destination,
+        out int bytesWritten,
+        ReadOnlySpan<char> format,
+        IFormatProvider? provider) =>
+        Value.TryFormat(utf8Destination, out bytesWritten, format, provider);
+
+    public static Counter64 Parse(string s, IFormatProvider? provider) =>
+        new(ulong.Parse(s, provider));
+
+    public static Counter64 Parse(ReadOnlySpan<char> s, IFormatProvider? provider) =>
+        new(ulong.Parse(s, provider));
+
+    public static bool TryParse(string? s, IFormatProvider? provider, out Counter64 result)
+    {
+        if (ulong.TryParse(s, provider, out var value))
+        {
+            result = new Counter64(value);
+            return true;
+        }
+
+        result = null!;
+        return false;
+    }
+
+    public static bool TryParse(ReadOnlySpan<char> s, IFormatProvider? provider, out Counter64 result)
+    {
+        if (ulong.TryParse(s, provider, out var value))
+        {
+            result = new Counter64(value);
+            return true;
+        }
+
+        result = null!;
+        return false;
     }
 
     /// <summary>
@@ -456,13 +505,18 @@ public class Counter64 : AsnType, IComparable<ulong>, IComparable<Counter64>, IC
     private int EncodeValue(Span<byte> buffer)
     {
         Span<byte> b = stackalloc byte[sizeof(ulong)];
-        BitConverter.TryWriteBytes(b, _value);
-        var length = 0;
-        for (var i = b.Length - 1; i >= 0; i--)
-            if (b[i] != 0 || length > 0)
-                buffer[length++] = b[i];
-        if (length == 0) length++; // value is 0. can't have an empty encoding
-        return length;
+        BinaryPrimitives.WriteUInt64BigEndian(b, _value);
+        var start = 0;
+        while (start < b.Length && b[start] == 0) start++;
+        if (start == b.Length)
+        {
+            buffer[0] = 0;
+            return 1;
+        }
+
+        var value = b[start..];
+        value.CopyTo(buffer);
+        return value.Length;
     }
 
     public const int MaxEncodedSize = MaxHeaderSize + sizeof(ulong);
@@ -495,7 +549,7 @@ public class Counter64 : AsnType, IComparable<ulong>, IComparable<Counter64>, IC
                 throw new OverflowException("Integer too large: cannot decode");
         }
 
-        Span<byte> tmpBuf = stackalloc byte[8]; // we need 8 bytes to represent a UInt64
+        Span<byte> tmpBuf = stackalloc byte[8];
         switch (headerLength)
         {
             case 9:
@@ -505,14 +559,10 @@ public class Counter64 : AsnType, IComparable<ulong>, IComparable<Counter64>, IC
                 break;
         }
 
-        while (headerLength > 0)
-        {
-            tmpBuf[headerLength - 1] = buffer[offset];
-            offset += 1;
-            headerLength -= 1;
-        }
-
-        _value = BitConverter.ToUInt64(tmpBuf);
+        tmpBuf.Clear();
+        buffer.Slice(offset, headerLength).CopyTo(tmpBuf[(tmpBuf.Length - headerLength)..]);
+        offset += headerLength;
+        _value = BinaryPrimitives.ReadUInt64BigEndian(tmpBuf);
 
         return offset;
     }
@@ -529,17 +579,10 @@ public class Counter64 : AsnType, IComparable<ulong>, IComparable<Counter64>, IC
     private int MemberByteLength()
     {
         Span<byte> b = stackalloc byte[sizeof(ulong)];
-        BitConverter.TryWriteBytes(b, Value);
-        var length = 0;
-        for (var i = b.Length - 1; i >= 0; i--)
-        {
-            if (b[i] == 0) continue;
-            length += i + 1;
-            break;
-        }
-
-        if (length == 0) length++; // value is 0. can't have an empty encoding
-        return length;
+        BinaryPrimitives.WriteUInt64BigEndian(b, Value);
+        var start = 0;
+        while (start < b.Length && b[start] == 0) start++;
+        return start == b.Length ? 1 : b.Length - start;
     }
 
     #endregion

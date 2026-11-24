@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Microsoft.CodeAnalysis;
 
 namespace SnmpSharpNet.Mib.SourceGenerator;
 
@@ -14,7 +13,7 @@ internal static class MibModuleRegistryTemplating
     public const string ClassName = "GeneratedMibModules";
     public const string HintName = "Snmp.GeneratedMibModules.generated.cs";
 
-    private static readonly string[] RequiredRuntimeTypes =
+    public static readonly string[] RequiredRuntimeTypes =
     [
         "SnmpSharpNet.Mib.Ast.ModuleDefinition",
         "SnmpSharpNet.Mib.MibParser",
@@ -22,8 +21,8 @@ internal static class MibModuleRegistryTemplating
     ];
 
     /// <summary>The registry depends on SnmpSharpNet.Mib at runtime; only emit it when that assembly is referenced.</summary>
-    public static bool CanEmit(Compilation compilation) =>
-        RequiredRuntimeTypes.All(name => compilation.GetTypeByMetadataName(name) is not null);
+    public static bool CanEmit(ISet<string> existingTypeNames) =>
+        RequiredRuntimeTypes.All(existingTypeNames.Contains);
 
     public static GeneratedSource Generate(IReadOnlyDictionary<string, string> sources)
     {

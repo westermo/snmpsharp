@@ -15,6 +15,7 @@
 // 
 
 using System;
+using System.Buffers.Binary;
 using System.Security.Cryptography;
 
 namespace SnmpSharpNet;
@@ -44,9 +45,8 @@ public class PrivacyAES : IPrivacyProtocol
         if (keyBytes != 16 && keyBytes != 24 && keyBytes != 32)
             throw new ArgumentOutOfRangeException(nameof(keyBytes), "Valid key sizes are 16, 24 and 32 bytes.");
         _keyBytes = keyBytes;
-        // initialize salt generator
-        var rand = new Random();
-        _salt = Convert.ToInt64(rand.Next(1, int.MaxValue));
+        var salt = RandomNumberGenerator.GetBytes(sizeof(long));
+        _salt = BinaryPrimitives.ReadInt64BigEndian(salt) & long.MaxValue;
     }
 
     /// <summary>
@@ -75,51 +75,19 @@ public class PrivacyAES : IPrivacyProtocol
         var iv = new byte[16];
         var salt = NextSalt();
         privacyParameters = new byte[PrivacyParametersLength];
-        var bootsBytes = BitConverter.GetBytes(engineBoots);
-        iv[0] = bootsBytes[3];
-        iv[1] = bootsBytes[2];
-        iv[2] = bootsBytes[1];
-        iv[3] = bootsBytes[0];
-        var timeBytes = BitConverter.GetBytes(engineTime);
-        iv[4] = timeBytes[3];
-        iv[5] = timeBytes[2];
-        iv[6] = timeBytes[1];
-        iv[7] = timeBytes[0];
+        BinaryPrimitives.WriteInt32BigEndian(iv, engineBoots);
+        BinaryPrimitives.WriteInt32BigEndian(iv.AsSpan(4), engineTime);
+        BinaryPrimitives.WriteInt64BigEndian(privacyParameters, salt);
+        privacyParameters.CopyTo(iv, 8);
 
-        // Set privacy parameters to the local 64 bit salt value
-        var saltBytes = BitConverter.GetBytes(salt);
-        privacyParameters[0] = saltBytes[7];
-        privacyParameters[1] = saltBytes[6];
-        privacyParameters[2] = saltBytes[5];
-        privacyParameters[3] = saltBytes[4];
-        privacyParameters[4] = saltBytes[3];
-        privacyParameters[5] = saltBytes[2];
-        privacyParameters[6] = saltBytes[1];
-        privacyParameters[7] = saltBytes[0];
-
-        // Copy salt value to the iv array
-        Buffer.BlockCopy(privacyParameters, 0, iv, 8, 8);
-
-        var rm = Aes.Create();
-        rm.KeySize = _keyBytes * 8;
-        rm.FeedbackSize = 128;
-        rm.BlockSize = 128;
-        // we have to use Zeros padding otherwise we get encrypt buffer size exception
-        rm.Padding = PaddingMode.Zeros;
-        rm.Mode = CipherMode.CFB;
-        // make sure we have the right key length
-        var pkey = new byte[MinimumKeyLength];
-        key[..MinimumKeyLength].CopyTo(pkey);
-        rm.Key = pkey;
-        rm.IV = iv;
-        using var encryptor = rm.CreateEncryptor();
-        var encryptedData = encryptor.TransformFinalBlock(unencryptedData.ToArray(), offset, length);
-        // check if encrypted data is the same length as source data
-        if (encryptedData.Length == unencryptedData.Length) return encryptedData;
-        // cut out the padding
-        var tmp = new byte[unencryptedData.Length];
-        Buffer.BlockCopy(encryptedData, 0, tmp, 0, unencryptedData.Length);
-        return tmp;
+        var paddedLength = checked((length + 15) / 16 * 16);
+        var paddedData = new byte[paddedLength];
+        unencryptedData.Slice(offset, length).CopyTo(paddedData);
+        using var aes = Aes.Create();
+        aes.Key = key[..MinimumKeyLength].ToArray();
+        aes.FeedbackSize = 128;
+        var encrypted = aes.EncryptCfb(paddedData, iv, PaddingMode.None, 128);
+        return encrypted.AsSpan(0, length).ToArray();
     }
 
     /// <summary>
@@ -143,61 +111,20 @@ public class PrivacyAES : IPrivacyProtocol
 
         var iv = new byte[16];
 
-        var bootsBytes = BitConverter.GetBytes(engineBoots);
-        iv[0] = bootsBytes[3];
-        iv[1] = bootsBytes[2];
-        iv[2] = bootsBytes[1];
-        iv[3] = bootsBytes[0];
-        var timeBytes = BitConverter.GetBytes(engineTime);
-        iv[4] = timeBytes[3];
-        iv[5] = timeBytes[2];
-        iv[6] = timeBytes[1];
-        iv[7] = timeBytes[0];
+        BinaryPrimitives.WriteInt32BigEndian(iv, engineBoots);
+        BinaryPrimitives.WriteInt32BigEndian(iv.AsSpan(4), engineTime);
 
         // Copy salt value to the iv array
         privacyParameters[..8].CopyTo(iv.AsSpan(8, 8));
 
-        byte[] decryptedData;
-
-        // now do CFB decryption of the encrypted data
-        using var rm = Aes.Create();
-        rm.KeySize = _keyBytes * 8;
-        rm.FeedbackSize = 128;
-        rm.BlockSize = 128;
-        rm.Padding = PaddingMode.Zeros;
-        rm.Mode = CipherMode.CFB;
-        if (key.Length > MinimumKeyLength)
-        {
-            var normKey = new byte[MinimumKeyLength];
-            key[..MinimumKeyLength].CopyTo(normKey);
-            rm.Key = normKey;
-        }
-        else
-        {
-            rm.Key = key.ToArray();
-        }
-
-        rm.IV = iv;
-        using var decryptor = rm.CreateDecryptor();
-
-        // We need to make sure that cryptedData is a collection of 128 byte blocks
-        if (cryptedData.Length % _keyBytes != 0)
-        {
-            var buffer = new byte[length];
-            cryptedData.Slice(offset, length).CopyTo(buffer);
-            var div = (int)Math.Floor(buffer.Length / (double)16);
-            var newLength = (div + 1) * 16;
-            var decryptBuffer = new byte[newLength];
-            Buffer.BlockCopy(buffer, 0, decryptBuffer, 0, buffer.Length);
-            decryptedData = decryptor.TransformFinalBlock(decryptBuffer, 0, decryptBuffer.Length);
-            // now remove padding
-            Buffer.BlockCopy(decryptedData, 0, buffer, 0, length);
-            return buffer;
-        }
-
-        decryptedData = decryptor.TransformFinalBlock(cryptedData.ToArray(), offset, length);
-
-        return decryptedData;
+        var paddedLength = checked((length + 15) / 16 * 16);
+        var paddedData = new byte[paddedLength];
+        cryptedData.Slice(offset, length).CopyTo(paddedData);
+        using var aes = Aes.Create();
+        aes.Key = key[..MinimumKeyLength].ToArray();
+        aes.FeedbackSize = 128;
+        var decrypted = aes.DecryptCfb(paddedData, iv, PaddingMode.None, 128);
+        return decrypted.AsSpan(0, length).ToArray();
     }
 
     /// <summary>

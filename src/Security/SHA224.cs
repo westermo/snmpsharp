@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Buffers.Binary;
 using System.Security.Cryptography;
 
 namespace SnmpSharpNet;
@@ -75,9 +76,7 @@ public sealed class SHA224 : HashAlgorithm
 
         // Now add 8 bytes (64 bits) to represent the length of the message in bits
         Span<byte> B = stackalloc byte[sizeof(ulong)];
-        BitConverter.TryWriteBytes(B, (ulong)plaintext.Length * 8);
-
-        B.Reverse();
+        BinaryPrimitives.WriteUInt64BigEndian(B, (ulong)plaintext.Length * 8);
         B.CopyTo(paddedText[count..]);
         B.Clear();
     }
@@ -228,6 +227,8 @@ public sealed class SHA224 : HashAlgorithm
     public override void Initialize()
     {
         Array.Copy(_initialHashValues, _state, _initialHashValues.Length);
+        Array.Clear(_buffer, 0, _buffer.Length);
+        _bufferLength = 0;
     }
 
     protected override void HashCore(byte[] array, int initialBlockStart, int currentBlockSize)

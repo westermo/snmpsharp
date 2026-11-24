@@ -1,0 +1,7 @@
+<Project>
+    <Import Project="..\Directory.Packages.props"/>
+    <PropertyGroup>
+        <!-- Let BenchmarkDotNet resolve Roslyn independently of the generator's API floor. -->
+        <CentralPackageTransitivePinningEnabled>false</CentralPackageTransitivePinningEnabled>
+    </PropertyGroup>
+</Project>

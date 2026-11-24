@@ -23,7 +23,7 @@ namespace SnmpSharpNet;
 ///     ASN.1 Gauge32 value class.
 /// </summary>
 [Serializable]
-public class Gauge32 : UInteger32, ICloneable
+public class Gauge32 : UInteger32
 {
     /// <summary>
     ///     Constructs the default counter object.

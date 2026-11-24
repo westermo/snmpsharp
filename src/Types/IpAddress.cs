@@ -15,11 +15,14 @@
 // 
 
 using System;
+using System.Buffers.Binary;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Contracts;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace SnmpSharpNet;
 
@@ -68,7 +71,7 @@ namespace SnmpSharpNet;
 ///     Note: internally, IpAddress class holds the value in a byte array, network ordered format.
 /// </remarks>
 [Serializable]
-public sealed class IpAddress : OctetString, IComparable
+public sealed class IpAddress : OctetString, IComparable, ISpanParsable<IpAddress>
 {
     /// <summary>
     ///     Constructs a default object with a
@@ -138,6 +141,7 @@ public sealed class IpAddress : OctetString, IComparable
     ///     in <see cref="IpAddress.Set(string)" /> method for details.
     /// </summary>
     /// <param name="inetAddr">IP address encoded as a string or host name</param>
+    [Obsolete("Use Parse for IPv4 literals, or create an IpAddress and call SetAsync for host names.")]
     public IpAddress(string inetAddr) : this()
     {
         Set(inetAddr);
@@ -244,34 +248,54 @@ public sealed class IpAddress : OctetString, IComparable
     ///     Class value will be set with the parsed dotted decimal IP address in the parameter or
     ///     if string parameter does not represent an IP address, DNS resolution
     ///     will be performed.
-    ///     Note: DNS resolution is performed using <see cref="System.Net.Dns.GetHostEntry(string)" /> and can result
-    ///     in a longer then expected delay in this function. In applications where responsiveness is
-    ///     important, name resolution should be performed using async methods available and result passed
-    ///     to this method.
+    ///     Host name resolution blocks the caller, including through the <see cref="OctetString.Set(string)"/>
+    ///     virtual method. Use <see cref="SetAsync"/> for asynchronous resolution.
     /// </remarks>
     /// <param name="value">IP address encoded as a string or host name</param>
     /// <exception cref="ArgumentException">Thrown when DNS resolution of the parameter value has failed.</exception>
     public override void Set(string value)
     {
-        if (!IPAddress.TryParse(value, out var ipa))
-            try
+        SetAsync(value).GetAwaiter().GetResult();
+    }
+
+    /// <summary>Resolves and sets an IP address asynchronously, preferring IPv4 when a host has both families.</summary>
+    /// <param name="value">IP address or host name.</param>
+    /// <param name="cancellationToken">Cancels DNS resolution.</param>
+    public async Task SetAsync(string value, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        if (IPAddress.TryParse(value, out var address))
+        {
+            if (address.AddressFamily != AddressFamily.InterNetwork)
+                throw new ArgumentException("SNMP IpAddress values must be IPv4 addresses.", nameof(value));
+            _data = address.GetAddressBytes();
+            return;
+        }
+
+        IPAddress[] addresses;
+        try
+        {
+            addresses = await Dns.GetHostAddressesAsync(value, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new ArgumentException("Unable to parse or resolve supplied value to an IP address.",
+                nameof(value), ex);
+        }
+
+        foreach (var candidate in addresses)
+            if (candidate.AddressFamily == AddressFamily.InterNetwork)
             {
-                var entry = Dns.GetHostEntry(value);
-                // have to loop through all returned addresses to make sure we pick IPv4 address
-                foreach (var addr in entry.AddressList)
-                    if (addr.AddressFamily == AddressFamily.InterNetwork)
-                    {
-                        _data = addr.GetAddressBytes();
-                        break;
-                    }
+                _data = candidate.GetAddressBytes();
+                return;
             }
-            catch
-            {
-                throw new ArgumentException("Unable to parse or resolve supplied value to an IP address.",
-                    nameof(value));
-            }
-        else
-            _data = ipa.GetAddressBytes();
+
+        throw new ArgumentException("Unable to parse or resolve supplied value to an IP address.",
+            nameof(value));
     }
 
     /// <summary>
@@ -344,6 +368,128 @@ public sealed class IpAddress : OctetString, IComparable
         buf.Append(data[3]);
 
         return buf.ToString();
+    }
+
+    public override string ToString(string? format, IFormatProvider? formatProvider)
+    {
+        ValidateFormat(format);
+        return ToString();
+    }
+
+    public override bool TryFormat(
+        Span<char> destination,
+        out int charsWritten,
+        ReadOnlySpan<char> format,
+        IFormatProvider? provider)
+    {
+        ValidateFormat(format);
+        charsWritten = 0;
+        if (_data.Length != 4) return false;
+
+        for (var i = 0; i < _data.Length; i++)
+        {
+            if (i > 0)
+            {
+                if (charsWritten == destination.Length)
+                {
+                    charsWritten = 0;
+                    return false;
+                }
+                destination[charsWritten++] = '.';
+            }
+
+            if (!_data[i].TryFormat(destination[charsWritten..], out var written, default, provider))
+            {
+                charsWritten = 0;
+                return false;
+            }
+
+            charsWritten += written;
+        }
+
+        return true;
+    }
+
+    public override bool TryFormat(
+        Span<byte> utf8Destination,
+        out int bytesWritten,
+        ReadOnlySpan<char> format,
+        IFormatProvider? provider)
+    {
+        ValidateFormat(format);
+        bytesWritten = 0;
+        if (_data.Length != 4) return false;
+
+        for (var i = 0; i < _data.Length; i++)
+        {
+            if (i > 0)
+            {
+                if (bytesWritten == utf8Destination.Length)
+                {
+                    bytesWritten = 0;
+                    return false;
+                }
+                utf8Destination[bytesWritten++] = (byte)'.';
+            }
+
+            if (!_data[i].TryFormat(utf8Destination[bytesWritten..], out var written, default, provider))
+            {
+                bytesWritten = 0;
+                return false;
+            }
+
+            bytesWritten += written;
+        }
+
+        return true;
+    }
+
+    public new static IpAddress Parse(string s, IFormatProvider? provider)
+    {
+        ArgumentNullException.ThrowIfNull(s);
+        return Parse(s.AsSpan(), provider);
+    }
+
+    public new static IpAddress Parse(ReadOnlySpan<char> s, IFormatProvider? provider)
+    {
+        if (!TryParse(s, provider, out var result))
+            throw new FormatException("Invalid IPv4 address.");
+        return result;
+    }
+
+    public static bool TryParse(string? s, IFormatProvider? provider, out IpAddress result)
+    {
+        if (s is null)
+        {
+            result = null!;
+            return false;
+        }
+
+        return TryParse(s.AsSpan(), provider, out result);
+    }
+
+    public static bool TryParse(ReadOnlySpan<char> s, IFormatProvider? provider, out IpAddress result)
+    {
+        if (IPAddress.TryParse(s, out var address) && address.AddressFamily == AddressFamily.InterNetwork)
+        {
+            result = new IpAddress(address);
+            return true;
+        }
+
+        result = null!;
+        return false;
+    }
+
+    private static void ValidateFormat(string? format)
+    {
+        if (format is not (null or "" or "G"))
+            throw new FormatException($"The format '{format}' is not supported.");
+    }
+
+    private static void ValidateFormat(ReadOnlySpan<char> format)
+    {
+        if (!format.IsEmpty && !format.SequenceEqual("G"))
+            throw new FormatException($"The format '{format.ToString()}' is not supported.");
     }
 
     /// <summary>
@@ -675,13 +821,7 @@ public sealed class IpAddress : OctetString, IComparable
     /// <returns>Reversed integer value</returns>
     public static uint ReverseByteOrder(uint val)
     {
-        var v = BitConverter.GetBytes(val);
-        var r = new byte[4];
-        r[0] = v[3];
-        r[1] = v[2];
-        r[2] = v[1];
-        r[3] = v[0];
-        return BitConverter.ToUInt32(r, 0);
+        return BinaryPrimitives.ReverseEndianness(val);
     }
 
     /// <summary>

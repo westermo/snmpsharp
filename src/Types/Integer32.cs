@@ -15,6 +15,8 @@
 // 
 
 using System;
+using System.Buffers.Binary;
+using System.Security.Cryptography;
 using System.Runtime.CompilerServices;
 
 namespace SnmpSharpNet;
@@ -27,7 +29,8 @@ namespace SnmpSharpNet;
 ///     exits now or may be defined in the future.
 /// </remarks>
 [Serializable]
-public class Integer32 : AsnType, IComparable<Integer32>, IComparable<int>, ICloneable
+public class Integer32 : AsnType, IComparable<Integer32>, IComparable<int>,
+    ISpanFormattable, IUtf8SpanFormattable, ISpanParsable<Integer32>
 {
     /// <summary>Internal class value</summary>
     protected int _value;
@@ -167,6 +170,53 @@ public class Integer32 : AsnType, IComparable<Integer32>, IComparable<int>, IClo
         return _value.ToString();
     }
 
+    public virtual string ToString(string? format, IFormatProvider? formatProvider) =>
+        _value.ToString(format, formatProvider);
+
+    public virtual bool TryFormat(
+        Span<char> destination,
+        out int charsWritten,
+        ReadOnlySpan<char> format,
+        IFormatProvider? provider) =>
+        _value.TryFormat(destination, out charsWritten, format, provider);
+
+    public virtual bool TryFormat(
+        Span<byte> utf8Destination,
+        out int bytesWritten,
+        ReadOnlySpan<char> format,
+        IFormatProvider? provider) =>
+        _value.TryFormat(utf8Destination, out bytesWritten, format, provider);
+
+    public static Integer32 Parse(string s, IFormatProvider? provider) =>
+        new(int.Parse(s, provider));
+
+    public static Integer32 Parse(ReadOnlySpan<char> s, IFormatProvider? provider) =>
+        new(int.Parse(s, provider));
+
+    public static bool TryParse(string? s, IFormatProvider? provider, out Integer32 result)
+    {
+        if (int.TryParse(s, provider, out var value))
+        {
+            result = new Integer32(value);
+            return true;
+        }
+
+        result = null!;
+        return false;
+    }
+
+    public static bool TryParse(ReadOnlySpan<char> s, IFormatProvider? provider, out Integer32 result)
+    {
+        if (int.TryParse(s, provider, out var value))
+        {
+            result = new Integer32(value);
+            return true;
+        }
+
+        result = null!;
+        return false;
+    }
+
     /// <summary>
     ///     Implicit casting of Integer32 value as Int32 value
     /// </summary>
@@ -203,8 +253,7 @@ public class Integer32 : AsnType, IComparable<Integer32>, IComparable<int>, IClo
     /// </summary>
     public void SetRandom()
     {
-        var rand = new Random();
-        _value = rand.Next();
+        _value = RandomNumberGenerator.GetInt32(int.MaxValue);
     }
 
     /// <summary>
@@ -386,71 +435,16 @@ public class Integer32 : AsnType, IComparable<Integer32>, IComparable<int>, IClo
     private int EncodeValue(Span<byte> buffer)
     {
         Span<byte> bytes = stackalloc byte[sizeof(int)];
-        BitConverter.TryWriteBytes(bytes, _value);
+        BinaryPrimitives.WriteInt32BigEndian(bytes, _value);
+        var start = 0;
+        while (start < bytes.Length - 1
+               && ((bytes[start] == 0 && (bytes[start + 1] & HIGH_BIT) == 0)
+                   || (bytes[start] == 0xff && (bytes[start + 1] & HIGH_BIT) != 0)))
+            start++;
 
-        var length = 0;
-
-        switch (_value)
-        {
-            // if value is negative
-            case < 0:
-            {
-                for (var i = 3; i >= 0; i--)
-                {
-                    if (length > 0 || bytes[i] != 0xff)
-                    {
-                        buffer[length++] = bytes[i];
-                    }
-                }
-
-                // if the value is -1 then all bytes in an integer are 0xff and will be skipped above
-                if (length == 0) buffer[length++] = 0xff;
-
-                // make sure value is negative
-                if ((buffer[0] & 0x80) == 0)
-                {
-                    buffer[..length].CopyTo(buffer[1..]);
-                    length++;
-                    buffer[0] = 0xff;
-                }
-
-                break;
-            }
-            case 0:
-                // this is just a shortcut to save processing time
-                length++;
-                break;
-            default:
-            {
-                for (var i = 3; i >= 0; i--)
-                    if (bytes[i] != 0 || length > 0)
-                        buffer[length++] = bytes[i];
-                // if buffer length is 0 then value is 0, and we have to add it to the buffer
-                if (length == 0)
-                {
-                    buffer[length++] = 0;
-                }
-                else if ((buffer[0] & 0x80) != 0)
-                {
-                    // first bit of the first byte has to be 0 otherwise value is negative.
-                    buffer[..length].CopyTo(buffer[1..]);
-                    length++;
-                    buffer[0] = 0;
-                }
-
-                break;
-            }
-        }
-
-        if (length <= 1) return length;
-        // check for 9 1s at the beginning of the encoded value
-        if (buffer[0] != 0xff || (buffer[1] & 0x80) == 0) return length;
-        // first bit of the first byte has to be 0 otherwise value is negative.
-        buffer[..length].CopyTo(buffer[1..]);
-        length++;
-        buffer[0] = 0;
-
-        return length;
+        var value = bytes[start..];
+        value.CopyTo(buffer);
+        return value.Length;
     }
 
     public const int MaxEncodedSize = MaxHeaderSize + sizeof(int);
@@ -521,77 +515,14 @@ public class Integer32 : AsnType, IComparable<Integer32>, IComparable<int>, IClo
     private int MemberLength()
     {
         Span<byte> bytes = stackalloc byte[sizeof(int)];
-        BitConverter.TryWriteBytes(bytes, Value);
+        BinaryPrimitives.WriteInt32BigEndian(bytes, Value);
+        var start = 0;
+        while (start < bytes.Length - 1
+               && ((bytes[start] == 0 && (bytes[start + 1] & HIGH_BIT) == 0)
+                   || (bytes[start] == 0xff && (bytes[start + 1] & HIGH_BIT) != 0)))
+            start++;
 
-        var length = 0;
-        var zeroth = -1;
-
-        switch (Value)
-        {
-            case < 0:
-            {
-                for (var i = 3; i >= 0; i--)
-                {
-                    if (bytes[i] == 0xff) continue;
-                    zeroth = i;
-                    length += i + 1;
-                    break;
-                }
-
-                if (length == 0)
-                {
-                    length++;
-                }
-
-                if (zeroth != -1)
-                {
-                    if ((bytes[zeroth] & 0x80) == 0)
-                    {
-                        length++;
-                    }
-                }
-
-                break;
-            }
-            case 0:
-                length++;
-                break;
-            default:
-            {
-                for (var i = 3; i >= 0; i--)
-                {
-                    if (bytes[i] == 0) continue;
-                    zeroth = i;
-                    length += i + 1;
-                    break;
-                }
-
-                if (length == 0)
-                {
-                    length++;
-                }
-
-                if (zeroth != -1)
-                {
-                    if ((bytes[zeroth] & 0x80) != 0)
-                    {
-                        length++;
-                    }
-                }
-
-                break;
-            }
-        }
-
-        if (length <= 1) return length;
-        if (zeroth <= 0) return length;
-        var slice = bytes.Slice(zeroth - 1, 2);
-        if (slice[0] == 0xff && (slice[1] & 0x80) != 0)
-        {
-            length++;
-        }
-
-        return length;
+        return bytes.Length - start;
     }
 
     #endregion encode and decode methods

@@ -89,10 +89,38 @@ public sealed class SnmpGenerator : IIncrementalGenerator
                     new EquatableArray<string>([.. builtins]));
             });
 
-        context.RegisterSourceOutput(context.CompilationProvider.Combine(allMibs).Combine(embedSources), (ctx, x) =>
+        var compilationTypeNames = allMibs
+            .Select((mibs, _) =>
+            {
+                var names = MibModuleRegistryTemplating.RequiredRuntimeTypes.AsEnumerable();
+                if (mibs.Item1 is not null)
+                {
+                    var tree = MibTree.Build(mibs.Item1, mibs.Item4);
+                    names = names.Concat(TreeTemplating.GetCompilationTypeNames(
+                        tree,
+                        mibs.Item1.Select(module => module.Value)));
+                }
+
+                return new EquatableArray<string>([.. names.Distinct(StringComparer.Ordinal)
+                    .OrderBy(name => name, StringComparer.Ordinal)]);
+            })
+            .WithTrackingName("MibCompilationTypeNames");
+
+        // Only type-presence decisions affect generation, not unrelated compilation edits.
+        var existingTypeNames = compilationTypeNames
+            .Combine(context.CompilationProvider)
+            .Select((pair, _) => new EquatableArray<string>([.. pair.Left
+                .Where(name => pair.Right.GetTypeByMetadataName(name) is not null)
+                .OrderBy(name => name, StringComparer.Ordinal)]))
+            .WithComparer(EqualityComparer<EquatableArray<string>>.Default)
+            .WithTrackingName("CompilationTypeAvailability");
+
+        var generationInput = allMibs.Combine(existingTypeNames).Combine(embedSources)
+            .WithTrackingName("MibGenerationInput");
+        context.RegisterSourceOutput(generationInput, (ctx, x) =>
         {
-            var compilation = x.Left.Left;
-            var mibs = x.Left.Right;
+            var mibs = x.Left.Left;
+            var existingTypes = new HashSet<string>(x.Left.Right, StringComparer.Ordinal);
             var embed = x.Right;
 
             if (mibs.Item2 is {} diagnostics)
@@ -106,12 +134,16 @@ public sealed class SnmpGenerator : IIncrementalGenerator
             }
 
             var tree = MibTree.Build(mibs.Item1!, mibs.Item4);
-            foreach (var source in TreeTemplating.Generate(tree, mibs.Item1!.Select(module => module.Value), compilation))
+            foreach (var source in TreeTemplating.Generate(
+                         tree,
+                         mibs.Item1!.Select(module => module.Value),
+                         existingTypes))
             {
                 ctx.AddSource(source.HintName, source.Source);
             }
 
-            if (embed && mibs.Item3 is { Count: > 0 } mibSources && MibModuleRegistryTemplating.CanEmit(compilation))
+            if (embed && mibs.Item3 is { Count: > 0 } mibSources
+                     && MibModuleRegistryTemplating.CanEmit(existingTypes))
             {
                 var registry = MibModuleRegistryTemplating.Generate(mibSources);
                 ctx.AddSource(registry.HintName, registry.Source);

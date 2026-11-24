@@ -22,7 +22,7 @@ namespace SnmpSharpNet;
 /// <remarks>
 ///     For details see <see cref="NoSuchInstance" />, <see cref="NoSuchObject" /> and <see cref="EndOfMibView" />.
 /// </remarks>
-public class V2Error : AsnType, ICloneable
+public class V2Error : AsnType
 {
     /// <summary>
     ///     Constructor

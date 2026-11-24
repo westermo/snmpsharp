@@ -50,7 +50,7 @@ namespace SnmpSharpNet;
 ///     GetNext request.
 ///     MaxRepeaters tells the agent how many variable bindings to return in a single Pdu for each requested Oid.
 /// </remarks>
-public class Pdu : AsnType, ICloneable, IEnumerable<Vb>
+public class Pdu : AsnType, IEnumerable<Vb>
 {
     /// <summary>
     ///     Constructor.

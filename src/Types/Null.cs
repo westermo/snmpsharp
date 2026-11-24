@@ -20,7 +20,7 @@ namespace SnmpSharpNet;
 
 /// <summary>ASN.1 Null value implementation.</summary>
 [Serializable]
-public class Null : AsnType, ICloneable
+public class Null : AsnType
 {
     /// <summary>Constructor</summary>
     public Null()

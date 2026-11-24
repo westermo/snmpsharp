@@ -13,6 +13,89 @@ The namespace has been prefixed with `Westermo`.
 # Document
 [see wiki](https://github.com/rqx110/SnmpSharpNet/wiki) 
 
+## Benchmarks
+
+Run from the repository root with the .NET 11 SDK:
+
+```powershell
+dotnet run -c Release --project .\benchmark\SnmpSharpNet.Benchmarks
+dotnet run -c Release --project .\benchmark\SnmpSharpNet.Mib.Benchmarks -- --filter '*'
+```
+
+The first command runs the authentication benchmarks under both .NET 11 JIT and Native AOT.
+The AOT job needs the [platform's Native AOT prerequisites](https://learn.microsoft.com/dotnet/core/deploying/native-aot/#prerequisites).
+Both projects accept BenchmarkDotNet arguments after `--`, such as `--list flat` or `--filter`.
+
+## Async UDP requests (.NET 11)
+
+UDP requests now use asynchronous socket I/O at their core:
+
+```csharp
+using var target = new UdpTarget(IPAddress.Parse("192.0.2.1"), 161, timeout: 2000, retry: 2);
+var parameters = new AgentParameters(SnmpVersion.Ver2, new OctetString("public"));
+var pdu = Pdu.GetPdu();
+pdu.VbList.Add(new Oid("1.3.6.1.2.1.1.1.0"));
+SnmpPacket reply = await target.RequestAsync(pdu, parameters, cancellationToken);
+```
+
+**Breaking API change:** replace callback-based `RequestAsync(pdu, parameters, callback)` with
+`await RequestAsync(pdu, parameters, cancellationToken)`. `DiscoveryAsync(parameters, cancellationToken)`
+now returns `Task<bool>` and resets/updates the supplied SNMPv3 parameters just like `Discovery`.
+The callback delegates and `AsyncRequestResult` have been removed; send, receive, encode, decode and
+validation failures now propagate as exceptions. SNMPv3 validation failures throw rather than returning null.
+
+`UdpTransport.RequestAsync(peer, port, ReadOnlyMemory<byte>, timeout, retries, cancellationToken)`
+provides the raw datagram API. Synchronous `Request` and `Discovery` are obsolete blocking wrappers.
+A target allows one transport request at a time; overlapping sync/async requests throw
+`InvalidOperationException`. Do not modify request data, security parameters or target settings
+during a request.
+
+The timeout covers each send/receive attempt; `retries: 0` sends once. Zero or -1 disables the timeout.
+Exhausting attempts throws `SnmpException` with `ErrorCode == SnmpException.RequestTimedOut`.
+Caller cancellation throws `OperationCanceledException` without retrying, and `Close`/`Dispose` aborts pending
+I/O and rejects future requests with `ObjectDisposedException`. No pending receive is left behind after timeout
+or cancellation. Replies from other IP addresses/ports are ignored within the attempt's timeout unless
+`AgentParameters.DisableReplySourceCheck` is enabled (v1/v2c only). Async requests now validate community and
+request ID using the same rules as synchronous requests.
+
+`SimpleSnmp` also exposes `GetAsync`, `GetNextAsync`, `GetBulkAsync`, `SetAsync` and
+`WalkAsync`. The request methods return non-null dictionaries on success and report failures as
+exceptions. A walk streams ordered bindings and completes normally when it leaves the subtree
+or reaches the end of the MIB, including with SNMPv1. String-host constructors defer DNS
+lookup until a request, where resolution errors propagate. `ResolveAsync` checks the peer
+explicitly and returns `false` for invalid or unresolved names; cancellation still throws.
+
+`TrapAgent` provides async send methods, implements `IDisposable` and `IAsyncDisposable`,
+and its `IPAddress` overloads support both IPv4 and IPv6 destinations. The static
+`TrapAgent.SendTrapAsync` helper disposes its socket after sending. Existing synchronous
+send methods remain as obsolete blocking wrappers.
+
+SNMP privacy salts are now initialized with cryptographic randomness, and generated
+request IDs no longer use time-seeded `Random` instances.
+
+### Migrating legacy APIs
+
+- Replace `Snmp` with `UdpTransport` for raw datagrams. Replace `CTarget`, `UTarget`, and
+  `ITarget` with `UdpTarget` plus `AgentParameters` for SNMPv1/v2c or
+  `SecureAgentParameters` for SNMPv3.
+- Replace obsolete synchronous `SimpleSnmp` operations with their async counterparts.
+  `SuppressExceptions` affects only the legacy synchronous operations.
+- ASN.1 values no longer implement `ICloneable`. Call `Clone()` on the `AsnType` or
+  concrete value directly; the return type is still `object`.
+- Replace `new IpAddress(string)` with `IpAddress.Parse` for IPv4 literals, or create an
+  `IpAddress` and call `SetAsync` for host names. `IpAddress.Set(string)` remains a virtual
+  override and can block on DNS, even when called through an `OctetString` reference.
+
+## Diagnostics
+
+The library emits `snmp.request` and `udp.request` activities from the
+`Westermo.SnmpSharpNet` activity source. Its `Westermo.SnmpSharpNet` meter records
+`snmpsharp.requests` (tagged with SNMP version, operation, and outcome),
+`snmpsharp.request.duration` (milliseconds), `snmpsharp.retries`, `snmpsharp.timeouts`,
+and `snmpsharp.authentication.failures`. Listen to the source/meter with
+`ActivityListener`/`MeterListener` or configure them through OpenTelemetry. Peer addresses,
+community strings, usernames, and credentials are not included in diagnostic tags.
+
 # Pipeline statuses
 [![Docker Image CI](https://github.com/westermo/snmpsharp/actions/workflows/docker-image.yml/badge.svg)](https://github.com/westermo/snmpsharp/actions/workflows/docker-image.yml)
 [![CodeQL](https://github.com/westermo/snmpsharp/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/westermo/snmpsharp/actions/workflows/codeql-analysis.yml)
@@ -29,7 +112,7 @@ OctetString s = "public";          string text = s;     // non-printable data yi
 OctetString b = new byte[] { 1 };  byte[] bytes = b;
 Oid oid = "1.3.6.1.2.1.1";         string dotted = oid;
 Oid fromIds = new uint[] { 1, 3 }; uint[] ids = oid;    // returns a copy
-IPAddress addr = new IpAddress("10.0.0.1");
+IPAddress addr = IpAddress.Parse("10.0.0.1", provider: null);
 var ip = (IpAddress)IPAddress.Loopback;                 // throws OverflowException for IPv6
 var ticks = (TimeTicks)TimeSpan.FromSeconds(5);         // throws OverflowException if out of range
 ```
@@ -41,6 +124,8 @@ Converting a `string` to `Oid` throws `FormatException`/`OverflowException` for 
 # MIB Source Generator
 
 `SnmpSharpNet.Mib.SourceGenerator` is a Roslyn incremental source generator that reads `.mib` files at compile time and emits a strongly typed, global C# representation of the complete OID tree. No attributes or hand-written partial classes are required.
+
+The packaged generator supports Roslyn 5.0 or later on a .NET 10 or later compiler host and emits C# 14 code. This is separate from the core library, which targets `net11.0`; .NET 10 projects still need a compatible core package.
 
 ## Basic usage
 

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Buffers.Binary;
 
 namespace SnmpSharpNet;
 
@@ -6,8 +7,7 @@ static class ShaUtilities
 {
     public static void UintToByteArray(uint x, Span<byte> span)
     {
-        BitConverter.TryWriteBytes(span, x);
-        span.Reverse();
+        BinaryPrimitives.WriteUInt32BigEndian(span, x);
     }
 
     public static void UintArrayToByteArray(ReadOnlySpan<uint> words, Span<byte> target)

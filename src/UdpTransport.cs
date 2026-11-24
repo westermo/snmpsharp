@@ -1,609 +1,212 @@
 // This file is part of SNMP#NET.
-// 
+//
 // SNMP#NET is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
-// 
+//
 // SNMP#NET is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU General Public License for more details.
-// 
+//
 // You should have received a copy of the GNU General Public License
-// along with SNMP#NET.  If not, see <http://www.gnu.org/licenses/>.
-// 
+// along with SNMP#NET. If not, see <http://www.gnu.org/licenses/>.
 
 using System;
 using System.Buffers;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace SnmpSharpNet;
 
-/// <summary>
-///     Async delegate called on completion of Async SNMP request
-/// </summary>
-/// <param name="status">SNMP request status. If status is NoError then pdu will contain valid information</param>
-/// <param name="peer">Peer IP and port number. This value is only valid if status is NoError</param>
-/// <param name="buffer">Returned data. This value is only valid if status is NoError</param>
-/// <param name="length">Length of the returned data. This value is only valid if status is NoError.</param>
-internal delegate void SnmpAsyncCallback(AsyncRequestResult status, IPEndPoint? peer, byte[]? buffer, int length);
-
-/// <summary>
-///     IP/UDP transport class.
-/// </summary>
+/// <summary>IP/UDP transport with cancellable asynchronous requests.</summary>
 public class UdpTransport : IDisposable
 {
-    /// <summary>
-    ///     Internal flag used to mark the class busy or available. Any request made when this
-    ///     flag is set to true will fail with OperationInProgress error.
-    /// </summary>
-    internal bool _busy;
+    private const int MaxDatagramSize = 64 * 1024;
+    private readonly object _socketLock = new();
+    private int _busy;
+    private bool _isIPv6;
 
-    /// <summary>
-    ///     Incoming data buffer
-    /// </summary>
-    internal byte[] _inBuffer = [];
-
-    /// <summary>
-    ///     Flag showing if class is using IPv6 or IPv4
-    /// </summary>
-    protected readonly bool _isIPv6;
-
-    /// <summary>
-    ///     Internal variable used to disable host IP address/port number check on received SNMP reply packets. If this option
-    ///     is disabled (default)
-    ///     only replies from the IP address/port number combination to which the request was sent will be accepted as valid
-    ///     packets.
-    ///     This value is set in the AgentParameters class and is only valid for SNMP v1 and v2c requests.
-    /// </summary>
+    /// <summary>Disables validation of the reply's source IP address and port.</summary>
     protected bool _noSourceCheck;
 
-    /// <summary>
-    ///     Receiver IP end point
-    /// </summary>
-    internal IPEndPoint? _receivePeer;
-
-    /// <summary>
-    ///     Async request state information.
-    /// </summary>
-    internal AsyncRequestState? _requestState;
-
-    /// <summary>
-    ///     Socket
-    /// </summary>
+    /// <summary>The transport socket.</summary>
     protected Socket? _socket;
 
-    /// <summary>
-    ///     Constructor. Initializes and binds the Socket class
-    /// </summary>
-    /// <param name="useV6">Set to true if you wish to initialize the transport for IPv6</param>
+    /// <summary>Initializes and binds an IPv4 or IPv6 UDP socket.</summary>
     public UdpTransport(bool useV6)
     {
-        _isIPv6 = useV6;
-        _socket = null;
-        initSocket(_isIPv6);
+        initSocket(useV6);
     }
 
-    /// <summary>
-    ///     Flag used to determine if class is using IP version 6 (true) or IP version 4 (false)
-    /// </summary>
+    /// <summary>Whether the transport uses IPv6.</summary>
     public bool IsIPv6 => _isIPv6;
 
-    /// <summary>
-    ///     Is class busy. This property is true when class is servicing another request, false if
-    ///     ready to process a new request.
-    /// </summary>
-    public bool IsBusy => _busy;
+    /// <summary>Whether a transport request is in progress.</summary>
+    public bool IsBusy => Volatile.Read(ref _busy) != 0;
 
-    /// <summary>
-    ///     Dispose of the class.
-    /// </summary>
+    /// <summary>Closes the socket and aborts any pending request.</summary>
     public void Dispose()
     {
         Close();
+        GC.SuppressFinalize(this);
     }
 
-    /// <summary>
-    ///     Destructor
-    /// </summary>
-    ~UdpTransport()
-    {
-        if (_socket == null) return;
-        _socket.Close();
-        _socket = null;
-    }
-
-    /// <summary>
-    ///     Initialize class socket
-    /// </summary>
-    /// <param name="useV6">Should socket be initialized for IPv6 (true) of IPv4 (false)</param>
+    /// <summary>Replaces the socket. Not permitted while a request is in progress.</summary>
     protected void initSocket(bool useV6)
     {
-        if (_socket != null) Close();
-        _socket = useV6 switch
+        lock (_socketLock)
         {
-            true => new Socket(AddressFamily.InterNetworkV6, SocketType.Dgram, ProtocolType.Udp),
-            _ => new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)
-        };
-        var ipEndPoint =
-            new IPEndPoint(_socket.AddressFamily == AddressFamily.InterNetwork ? IPAddress.Any : IPAddress.IPv6Any, 0);
-        EndPoint ep = ipEndPoint;
-        _socket.Bind(ep);
+            if (IsBusy) throw new InvalidOperationException("A request is in progress.");
+            var socket = new Socket(useV6 ? AddressFamily.InterNetworkV6 : AddressFamily.InterNetwork,
+                SocketType.Dgram, ProtocolType.Udp);
+            try
+            {
+                socket.Bind(new IPEndPoint(useV6 ? IPAddress.IPv6Any : IPAddress.Any, 0));
+            }
+            catch
+            {
+                socket.Dispose();
+                throw;
+            }
+
+            _socket?.Dispose();
+            _socket = socket;
+            _isIPv6 = useV6;
+        }
     }
 
-    /// <summary>
-    ///     Make sync request using IP/UDP with request timeouts and retries.
-    /// </summary>
-    /// <param name="peer">SNMP agent IP address</param>
-    /// <param name="port">SNMP agent port number</param>
-    /// <param name="buffer">Data to send to the agent</param>
-    /// <param name="bufferLength">Data length in the buffer</param>
-    /// <param name="timeout">Timeout in milliseconds</param>
-    /// <param name="retries">Maximum number of retries. 0 = make a single request with no retry attempts</param>
-    /// <returns>Byte array returned by the agent. Null on error</returns>
-    /// <exception cref="SnmpException">
-    ///     Thrown on request timed out. SnmpException.ErrorCode is set to
-    ///     SnmpException.RequestTimedOut constant.
-    /// </exception>
-    /// <exception cref="SnmpException">Thrown when IPv4 address is passed to the v6 socket or vice versa</exception>
-    public byte[]? Request(IPAddress peer, int port, byte[] buffer, int bufferLength, int timeout, int retries)
+    /// <summary>Synchronously waits for <see cref="RequestAsync"/>.</summary>
+    [Obsolete("Use RequestAsync; this synchronous wrapper blocks the calling thread.")]
+    public byte[] Request(IPAddress peer, int port, byte[] buffer, int bufferLength, int timeout, int retries)
     {
-        if (_socket == null) return null; // socket has been closed. no new operations are possible.
+        ArgumentNullException.ThrowIfNull(buffer);
+        return RequestAsync(peer, port, buffer.AsMemory(0, bufferLength), timeout, retries)
+            .GetAwaiter().GetResult();
+    }
 
-        if (_socket.AddressFamily != peer.AddressFamily)
-            throw new SnmpException("Invalid address protocol version.");
+    /// <summary>Sends a UDP request and awaits its response.</summary>
+    /// <param name="peer">Agent IP address.</param>
+    /// <param name="port">Agent UDP port.</param>
+    /// <param name="buffer">Datagram to send; must remain unchanged until completion.</param>
+    /// <param name="timeout">Per-attempt timeout in milliseconds. Zero or -1 means no timeout.</param>
+    /// <param name="retries">Number of additional attempts after the initial request.</param>
+    /// <param name="cancellationToken">Cancels the entire request without retrying.</param>
+    /// <exception cref="InvalidOperationException">Another request is in progress.</exception>
+    /// <exception cref="ObjectDisposedException">The transport is closed.</exception>
+    /// <exception cref="OperationCanceledException">The caller canceled the request.</exception>
+    /// <exception cref="SnmpException">All attempts timed out.</exception>
+    /// <exception cref="SnmpNetworkException">A socket operation failed.</exception>
+    public Task<byte[]> RequestAsync(IPAddress peer, int port, ReadOnlyMemory<byte> buffer, int timeout, int retries,
+        CancellationToken cancellationToken = default) =>
+        RequestCoreAsync(peer, port, buffer, timeout, retries, _noSourceCheck, cancellationToken);
 
+    /// <summary>Performs a request using a request-local reply-source policy.</summary>
+    protected async Task<byte[]> RequestCoreAsync(IPAddress peer, int port, ReadOnlyMemory<byte> buffer, int timeout,
+        int retries, bool disableSourceCheck, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(peer);
+        ArgumentOutOfRangeException.ThrowIfLessThan(timeout, -1);
+        ArgumentOutOfRangeException.ThrowIfNegative(retries);
+        cancellationToken.ThrowIfCancellationRequested();
         var netPeer = new IPEndPoint(peer, port);
+        Socket socket;
+        lock (_socketLock)
+        {
+            socket = _socket ?? throw new ObjectDisposedException(nameof(UdpTransport));
+            if (socket.AddressFamily != peer.AddressFamily)
+                throw new SnmpException("Invalid address protocol version.");
+            if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0)
+                throw new InvalidOperationException("A request is in progress.");
+        }
 
-        _socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReceiveTimeout, timeout);
-        var inbuffer = ArrayPool<byte>.Shared.Rent(MaxDatagramSize);
+        using var activity = SnmpDiagnostics.ActivitySource.StartActivity("udp.request", ActivityKind.Client);
+        activity?.SetTag("network.transport", "udp");
+        activity?.SetTag("network.address.family", peer.AddressFamily.ToString());
+        byte[]? receiveBuffer = null;
         try
         {
-            return ReceiveLoop(_socket, buffer, bufferLength, retries, netPeer, inbuffer, peer.AddressFamily);
+            receiveBuffer = ArrayPool<byte>.Shared.Rent(MaxDatagramSize);
+            EndPoint anyPeer = new IPEndPoint(IsIPv6 ? IPAddress.IPv6Any : IPAddress.Any, 0);
+            for (var attempt = 0;; attempt++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                using var attemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                if (timeout > 0) attemptCancellation.CancelAfter(timeout);
+                try
+                {
+                    await socket.SendToAsync(buffer, SocketFlags.None, netPeer, attemptCancellation.Token)
+                        .ConfigureAwait(false);
+                    while (true)
+                    {
+                        var result = await socket.ReceiveFromAsync(receiveBuffer.AsMemory(0, MaxDatagramSize),
+                            SocketFlags.None, anyPeer, attemptCancellation.Token).ConfigureAwait(false);
+                        if (!disableSourceCheck && !result.RemoteEndPoint.Equals(netPeer)) continue;
+                        if (result.ReceivedBytes == 0) break;
+                        activity?.SetStatus(ActivityStatusCode.Ok);
+                        return receiveBuffer.AsSpan(0, result.ReceivedBytes).ToArray();
+                    }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw new OperationCanceledException(cancellationToken);
+                }
+                catch (OperationCanceledException) when (attemptCancellation.IsCancellationRequested)
+                {
+                    // Awaiting cancellation removes the pending receive before the next attempt starts.
+                }
+                catch (SocketException ex) when (ex.SocketErrorCode is SocketError.TimedOut or SocketError.MessageSize)
+                {
+                    // Retry transient timeout/oversized-datagram failures.
+                }
+                catch (SocketException) when (!ReferenceEquals(socket, _socket))
+                {
+                    throw new ObjectDisposedException(nameof(UdpTransport));
+                }
+                catch (SocketException ex)
+                {
+                    throw new SnmpNetworkException(ex, $"Network error: {ex.SocketErrorCode}.");
+                }
+
+                if (attempt >= retries)
+                {
+                    SnmpDiagnostics.Timeouts.Add(1, SnmpDiagnostics.TransportTags("timeout"));
+                    activity?.SetStatus(ActivityStatusCode.Error, "request timed out");
+                    throw new SnmpException(SnmpException.RequestTimedOut, "Request has reached maximum retries.");
+                }
+
+                SnmpDiagnostics.Retries.Add(1, SnmpDiagnostics.TransportTags("retry"));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, "request canceled");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.GetType().Name);
+            throw;
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(inbuffer);
+            if (receiveBuffer != null) ArrayPool<byte>.Shared.Return(receiveBuffer);
+            Interlocked.Exchange(ref _busy, 0);
         }
     }
 
-    private const int MaxDatagramSize = 64 * 1024;
-
-    private byte[] ReceiveLoop(Socket socket, byte[] buffer, int bufferLength, int retries, IPEndPoint netPeer,
-        byte[] inbuffer, AddressFamily addressFamily)
-    {
-        var recv = 0;
-        var retry = 0;
-        EndPoint remote =
-            new IPEndPoint(addressFamily == AddressFamily.InterNetwork ? IPAddress.Any : IPAddress.IPv6Any, 0);
-        while (true)
-        {
-            try
-            {
-                socket.SendTo(buffer, bufferLength, SocketFlags.None, netPeer);
-                recv = socket.ReceiveFrom(inbuffer, 0, MaxDatagramSize, SocketFlags.None, ref remote);
-            }
-            catch (SocketException ex)
-            {
-                recv = ex.ErrorCode switch
-                {
-                    10040 => 0, // Packet too large
-                    10050 => throw new SnmpNetworkException(ex, "Network error: Destination network is down."),
-                    10051 => throw new SnmpNetworkException(ex, "Network error: destination network is unreachable."),
-                    10054 => throw new SnmpNetworkException(ex, "Network error: connection reset by peer."),
-                    10064 => throw new SnmpNetworkException(ex, "Network error: remote host is down."),
-                    10065 => throw new SnmpNetworkException(ex, "Network error: remote host is unreachable."),
-                    10061 => throw new SnmpNetworkException(ex, "Network error: connection refused."),
-                    10060 => 0 // Connection attempt timed out. Fall through to retry
-                    ,
-                    _ => recv
-                };
-                // Assume it is a timeout
-            }
-
-            switch (recv)
-            {
-                case > 0:
-                {
-                    if (!_noSourceCheck && remote is IPEndPoint remEP && !remEP.Equals(netPeer))
-                    {
-                        if (!Equals(remEP.Address, netPeer.Address))
-                            Console.WriteLine("Address miss-match {0} != {1}", remEP.Address, netPeer.Address);
-                        if (remEP.Port != netPeer.Port)
-                            Console.WriteLine("Port # miss-match {0} != {1}", remEP.Port, netPeer.Port);
-                        /* Not good, we got a response from somebody other then who we requested a response from */
-                        retry++;
-                        if (retry > retries)
-                            throw new SnmpException(SnmpException.RequestTimedOut,
-                                "Request has reached maximum retries.");
-                        // return null;
-                    }
-                    else
-                    {
-                        if (recv <= inbuffer.Length)
-                        {
-                            var buf = inbuffer[..recv];
-                            return buf;
-                        }
-                    }
-
-                    break;
-                }
-                default:
-                {
-                    retry++;
-                    if (retry > retries)
-                        throw new SnmpException(SnmpException.RequestTimedOut, "Request has reached maximum retries.");
-                    break;
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    ///     SNMP request internal callback
-    /// </summary>
-    internal event SnmpAsyncCallback? _asyncCallback;
-
-    /// <summary>
-    ///     Begin an async SNMP request
-    /// </summary>
-    /// <param name="peer">Pdu to send to the agent</param>
-    /// <param name="port">Callback to receive response from the agent</param>
-    /// <param name="buffer">Buffer containing data to send to the peer</param>
-    /// <param name="bufferLength">Length of data in the buffer</param>
-    /// <param name="timeout">Request timeout in milliseconds</param>
-    /// <param name="retries">Maximum retry count. 0 = single request no further retries.</param>
-    /// <param name="asyncCallback">Callback that will receive the status and result of the operation</param>
-    /// <returns>
-    ///     Returns false if another request is already in progress or if socket used by the class
-    ///     has been closed using Dispose() member, otherwise true
-    /// </returns>
-    /// <exception cref="SnmpException">Thrown when IPv4 address is passed to the v6 socket or vice versa</exception>
-    internal bool RequestAsync(IPAddress peer, int port, byte[] buffer, int bufferLength, int timeout, int retries,
-        SnmpAsyncCallback asyncCallback)
-    {
-        switch (_busy)
-        {
-            case true:
-                return false;
-        }
-
-        switch (_socket)
-        {
-            case null:
-                return false; // socket has been closed. no new operations are possible.
-        }
-
-        if (_socket.AddressFamily != peer.AddressFamily)
-            throw new SnmpException("Invalid address protocol version.");
-        _busy = true;
-        _asyncCallback = null;
-        _asyncCallback += asyncCallback;
-        _requestState = new AsyncRequestState(peer, port, retries, timeout)
-        {
-            Packet = buffer,
-            PacketLength = bufferLength
-        };
-
-        // _socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReceiveTimeout, _requestState.Timeout);
-
-        if (_inBuffer.Length != MaxDatagramSize)
-            _inBuffer = new byte[MaxDatagramSize]; // allocated once; reuse is safe because _busy serializes requests
-
-        SendToBegin(); // Send the request
-
-        return true;
-    }
-
-    /// <summary>
-    ///     Calls async version of the SendTo socket function.
-    /// </summary>
-    internal void SendToBegin()
-    {
-        switch (_requestState)
-        {
-            case null:
-                _busy = false;
-                return;
-        }
-
-        // kill the timeout timer - there shouldn't be one active when we are sending a new request
-        if (_requestState.Timer != null)
-        {
-            _requestState.Timer.Dispose();
-            _requestState.Timer = null;
-        }
-
-        switch (_socket)
-        {
-            case null:
-                _busy = false;
-                _requestState = null;
-                _asyncCallback?.Invoke(AsyncRequestResult.Terminated, new IPEndPoint(IPAddress.Any, 0), [], 0);
-                return; // socket has been closed. no new operations are possible.
-            default:
-                try
-                {
-                    _socket.BeginSendTo(_requestState.Packet, 0, _requestState.PacketLength, SocketFlags.None,
-                        _requestState.EndPoint, SendToCallback, null);
-                }
-                catch
-                {
-                    _busy = false;
-                    _requestState = null;
-                    _asyncCallback?.Invoke(AsyncRequestResult.SocketSendError,
-                        new IPEndPoint(
-                            _socket.AddressFamily == AddressFamily.InterNetwork ? IPAddress.Any : IPAddress.IPv6Any,
-                            0), [], 0);
-                }
-
-                break;
-        }
-    }
-
-    /// <summary>
-    ///     Callback member called on completion of BeginSendTo send data operation.
-    /// </summary>
-    /// <param name="ar">Async result</param>
-    internal void SendToCallback(IAsyncResult ar)
-    {
-        if (_socket == null || !_busy || _requestState == null)
-        {
-            _busy = false;
-            _requestState = null;
-            _asyncCallback?.Invoke(AsyncRequestResult.Terminated, new IPEndPoint(IPAddress.Any, 0), null, 0);
-            return; // socket has been closed. no new operations are possible.
-        }
-
-        int sentLength;
-        try
-        {
-            sentLength = _socket.EndSendTo(ar);
-        }
-        catch (NullReferenceException)
-        {
-            _busy = false;
-            _requestState = null;
-            _asyncCallback?.Invoke(AsyncRequestResult.Terminated,
-                new IPEndPoint(_socket.AddressFamily == AddressFamily.InterNetwork ? IPAddress.Any : IPAddress.IPv6Any,
-                    0), [], 0);
-            return;
-        }
-        catch
-        {
-            sentLength = 0;
-        }
-
-        if (sentLength != _requestState.PacketLength)
-        {
-            _busy = false;
-            _requestState = null;
-            _asyncCallback?.Invoke(AsyncRequestResult.SocketSendError,
-                new IPEndPoint(_socket.AddressFamily == AddressFamily.InterNetwork ? IPAddress.Any : IPAddress.IPv6Any,
-                    0), [], 0);
-            return;
-        }
-
-        // Start receive timer
-        ReceiveBegin(); // Initialize a receive call
-    }
-
-    /// <summary>
-    ///     Begin async version of ReceiveFrom member of the socket class.
-    /// </summary>
-    internal void ReceiveBegin()
-    {
-        // kill the timeout timer
-        if (_requestState?.Timer != null)
-        {
-            _requestState.Timer.Dispose();
-            _requestState.Timer = null;
-        }
-
-        if (_socket == null || !_busy || _requestState == null)
-        {
-            _busy = false;
-            _requestState = null;
-            if (_socket != null)
-                _asyncCallback?.Invoke(AsyncRequestResult.Terminated,
-                    new IPEndPoint(
-                        _socket.AddressFamily == AddressFamily.InterNetwork ? IPAddress.Any : IPAddress.IPv6Any, 0),
-                    null, 0);
-            else
-                _asyncCallback?.Invoke(AsyncRequestResult.Terminated, new IPEndPoint(IPAddress.Any, 0), null, 0);
-            return;
-            // socket has been closed. no new operations are possible.
-        }
-
-        _receivePeer =
-            new IPEndPoint(_socket.AddressFamily == AddressFamily.InterNetwork ? IPAddress.Any : IPAddress.IPv6Any, 0);
-        var ep = (EndPoint)_receivePeer;
-        try
-        {
-            _socket.BeginReceiveFrom(_inBuffer, 0, _inBuffer.Length, SocketFlags.None, ref ep, ReceiveFromCallback,
-                null);
-        }
-        catch
-        {
-            // retry on every error. this can be done better by evaluating the returned
-            // error value but it's a lot of work and for a non-acked protocol, just send it again
-            // until you reach max retries.
-            RetryAsyncRequest();
-            return;
-        }
-
-        _requestState.Timer = new Timer(AsyncRequestTimerCallback, null, _requestState.Timeout, Timeout.Infinite);
-    }
-
-    /// <summary>
-    ///     Internal retry function. Checks if request has reached maximum number of retries and either resends the request if
-    ///     not reached,
-    ///     or sends request timed-out notification to the caller if maximum retry count has been reached and request has
-    ///     failed.
-    /// </summary>
-    internal void RetryAsyncRequest()
-    {
-        // kill the timer if one is active
-        if (_requestState?.Timer != null)
-        {
-            _requestState.Timer.Dispose();
-            _requestState.Timer = null;
-        }
-
-        if (_socket == null || !_busy || _requestState == null)
-        {
-            _busy = false;
-            _requestState = null;
-            if (_socket != null)
-                _asyncCallback?.Invoke(AsyncRequestResult.Terminated,
-                    new IPEndPoint(
-                        _socket.AddressFamily == AddressFamily.InterNetwork ? IPAddress.Any : IPAddress.IPv6Any, 0),
-                    null, 0);
-            else
-                _asyncCallback?.Invoke(AsyncRequestResult.Terminated, new IPEndPoint(IPAddress.Any, 0), null, 0);
-            return; // socket has been closed. no new operations are possible.
-        }
-
-        // We increment the retry counter before retry count. Initial CurrentRetry value is set to -1 so that
-        // MaxRetries value can be 0 (first request is not counted as a retry).
-        _requestState.CurrentRetry += 1;
-        if (_requestState.CurrentRetry >= _requestState.MaxRetries)
-        {
-            _busy = false;
-            _requestState = null;
-            _asyncCallback?.Invoke(AsyncRequestResult.Timeout,
-                new IPEndPoint(_socket.AddressFamily == AddressFamily.InterNetwork ? IPAddress.Any : IPAddress.IPv6Any,
-                    0), [], 0);
-        }
-        else
-        {
-            SendToBegin();
-        }
-    }
-
-    /// <summary>
-    ///     Internal callback called as part of Socket.BeginReceiveFrom. Process incoming packets and notify caller
-    ///     of results.
-    /// </summary>
-    /// <param name="ar">Async call result used by <seealso cref="Socket.EndReceiveFrom" /></param>
-    internal void ReceiveFromCallback(IAsyncResult ar)
-    {
-        // kill the timer if one is active
-        if (_requestState?.Timer != null)
-        {
-            _requestState.Timer.Dispose();
-            _requestState.Timer = null;
-        }
-
-        if (_socket == null || !_busy || _requestState == null)
-        {
-            _busy = false;
-            _requestState = null;
-            if (_socket == null)
-                _asyncCallback?.Invoke(AsyncRequestResult.Terminated,
-                    new IPEndPoint(
-                        _socket?.AddressFamily == AddressFamily.InterNetwork ? IPAddress.Any : IPAddress.IPv6Any, 0),
-                    [], 0);
-            else
-                _asyncCallback?.Invoke(AsyncRequestResult.Terminated, new IPEndPoint(IPAddress.Any, 0), null, 0);
-
-            return; // socket has been closed. no new operations are possible.
-        }
-
-        var inlen = 0;
-        EndPoint? ep = _receivePeer;
-        if (ep is null) return; //No endpoint, nothing to recieve from
-        try
-        {
-            inlen = _socket.EndReceiveFrom(ar, ref ep);
-        }
-        catch (SocketException ex)
-        {
-            switch (ex.ErrorCode)
-            {
-                case 10040:
-                    inlen = 0; // Packet too large
-                    break;
-                case 10050:
-                case 10051:
-                case 10054:
-                case 10064:
-                case 10065:
-                case 10061:
-                    _busy = false;
-                    _requestState = null;
-                    _asyncCallback?.Invoke(AsyncRequestResult.SocketReceiveError, null, null, -1);
-                    return;
-                case 10060:
-                    inlen = 0; // Connection attempt timed out. Fall through to retry
-                    break;
-            }
-            // Assume it is a timeout
-        }
-        catch (ObjectDisposedException)
-        {
-            _asyncCallback?.Invoke(AsyncRequestResult.Terminated, null, null, -1);
-            return;
-        }
-        catch (NullReferenceException)
-        {
-            _asyncCallback?.Invoke(AsyncRequestResult.Terminated, null, null, -1);
-            return;
-        }
-        catch (Exception)
-        {
-            // we don't care what exception happened. We only want to know if we should retry the request
-            inlen = 0;
-        }
-
-        switch (inlen)
-        {
-            case 0:
-                RetryAsyncRequest();
-                break;
-            default:
-            {
-                // make a copy of the data from the internal buffer
-                var buf = new byte[inlen];
-                Buffer.BlockCopy(_inBuffer, 0, buf, 0, inlen);
-                _busy = false;
-                _requestState = null;
-                _asyncCallback?.Invoke(AsyncRequestResult.NoError, _receivePeer, buf, buf.Length);
-                break;
-            }
-        }
-    }
-
-    /// <summary>
-    ///     Internal timer callback. Called by _asyncTimer when SNMP request timeout has expired
-    /// </summary>
-    /// <param name="stateInfo">State info. Always null</param>
-    internal void AsyncRequestTimerCallback(object? stateInfo)
-    {
-        if (_socket != null || (_requestState != null && _busy))
-            // Call retry function
-            RetryAsyncRequest();
-    }
-
-    /// <summary>
-    ///     Close network socket
-    /// </summary>
+    /// <summary>Closes the socket and aborts any pending request.</summary>
     public void Close()
     {
-        if (_socket == null) return;
-        try
+        lock (_socketLock)
         {
-            _socket.Close();
+            var socket = _socket;
+            _socket = null;
+            socket?.Dispose();
         }
-        catch
-        {
-            // ignored
-        }
-
-        _socket = null;
     }
 }

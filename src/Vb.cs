@@ -21,7 +21,7 @@ namespace SnmpSharpNet;
 /// <summary>
 ///     Vb item. Stores Oid => value pair for each value
 /// </summary>
-public class Vb : AsnType, ICloneable
+public class Vb : AsnType
 {
     /// <summary>
     ///     OID of the object

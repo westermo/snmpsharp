@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
-using Microsoft.CodeAnalysis;
 
 namespace SnmpSharpNet.Mib.SourceGenerator;
 
@@ -278,7 +277,11 @@ internal sealed class TextualConventionNames
 }
 
 /// <summary>Maps MIB objects onto the generated C# types that expose their values.</summary>
-internal sealed class ValueTypeResolver(MibTreeNode root, Compilation compilation, TextualConventionNames tcNames)
+internal sealed class ValueTypeResolver(
+    MibTreeNode root,
+    ISet<string> existingTypeNames,
+    TextualConventionNames tcNames,
+    ISet<string>? collectedTypeNames = null)
 {
     public ValueTypeInfo Resolve(MibLeaf leaf)
     {
@@ -327,13 +330,20 @@ internal sealed class ValueTypeResolver(MibTreeNode root, Compilation compilatio
     // enum when it is either going to be generated or has been declared by the user.
     private string? Owned(string generatedType, string owner, string enumName)
     {
-        if (compilation.GetTypeByMetadataName(generatedType) is not null
-            && compilation.GetTypeByMetadataName($"{owner}+{enumName}") is null)
+        var generatedTypeExists = HasType(generatedType);
+        var enumTypeExists = HasType($"{owner}+{enumName}");
+        if (generatedTypeExists && !enumTypeExists)
         {
             return null;
         }
 
         return $"global::{owner}.{enumName}";
+    }
+
+    private bool HasType(string name)
+    {
+        collectedTypeNames?.Add(name);
+        return collectedTypeNames is null && existingTypeNames.Contains(name);
     }
 
     private MibTreeNode? Find(MibItemIdent ident)

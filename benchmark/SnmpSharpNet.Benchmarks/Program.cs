@@ -3,4 +3,5 @@
 using BenchmarkDotNet.Running;
 using SnmpSharpNet.Benchmarks.Security;
 
-var summary = BenchmarkRunner.Run<AuthenticationBenchmarks>();
+BenchmarkSwitcher.FromAssembly(typeof(AuthenticationBenchmarks).Assembly)
+    .Run(args.Length == 0 ? ["--filter", $"*{nameof(AuthenticationBenchmarks)}.*"] : args);

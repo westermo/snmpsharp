@@ -6,7 +6,7 @@ namespace SnmpSharpNet;
 ///     Represents SNMP sequence
 /// </summary>
 [Serializable]
-public class Sequence : AsnType, ICloneable
+public class Sequence : AsnType
 {
     /// <summary>
     ///     data buffer

@@ -28,7 +28,8 @@ namespace SnmpSharpNet;
 ///     SMI Object Identifier type implementation.
 /// </summary>
 [Serializable]
-public sealed class Oid : AsnType, ICloneable, IComparable, IEnumerable<uint>
+public sealed class Oid : AsnType, IComparable, IEnumerable<uint>,
+    ISpanFormattable, IUtf8SpanFormattable, ISpanParsable<Oid>
 {
     /// <summary>Internal buffer</summary>
     private uint[] _data;
@@ -362,6 +363,147 @@ public sealed class Oid : AsnType, ICloneable, IComparable, IEnumerable<uint>
         return buf.ToString();
     }
 
+    public string ToString(string? format, IFormatProvider? formatProvider)
+    {
+        ValidateFormat(format);
+        return ToString();
+    }
+
+    public bool TryFormat(
+        Span<char> destination,
+        out int charsWritten,
+        ReadOnlySpan<char> format,
+        IFormatProvider? provider)
+    {
+        ValidateFormat(format);
+        charsWritten = 0;
+        if (_data is null)
+        {
+            if (!"0.0".AsSpan().TryCopyTo(destination)) return false;
+            charsWritten = 3;
+            return true;
+        }
+
+        Span<char> digits = stackalloc char[10];
+        for (var i = 0; i < _data.Length; i++)
+        {
+            if (i > 0)
+            {
+                if (charsWritten == destination.Length)
+                {
+                    charsWritten = 0;
+                    return false;
+                }
+                destination[charsWritten++] = '.';
+            }
+
+            if (!_data[i].TryFormat(digits, out var digitCount, default, provider)
+                || digitCount > destination.Length - charsWritten)
+            {
+                charsWritten = 0;
+                return false;
+            }
+
+            digits[..digitCount].CopyTo(destination[charsWritten..]);
+            charsWritten += digitCount;
+        }
+
+        return true;
+    }
+
+    public bool TryFormat(
+        Span<byte> utf8Destination,
+        out int bytesWritten,
+        ReadOnlySpan<char> format,
+        IFormatProvider? provider)
+    {
+        ValidateFormat(format);
+        bytesWritten = 0;
+        if (_data is null)
+        {
+            if (!"0.0"u8.TryCopyTo(utf8Destination)) return false;
+            bytesWritten = 3;
+            return true;
+        }
+
+        Span<byte> digits = stackalloc byte[10];
+        for (var i = 0; i < _data.Length; i++)
+        {
+            if (i > 0)
+            {
+                if (bytesWritten == utf8Destination.Length)
+                {
+                    bytesWritten = 0;
+                    return false;
+                }
+                utf8Destination[bytesWritten++] = (byte)'.';
+            }
+
+            if (!_data[i].TryFormat(digits, out var digitCount, default, provider)
+                || digitCount > utf8Destination.Length - bytesWritten)
+            {
+                bytesWritten = 0;
+                return false;
+            }
+
+            digits[..digitCount].CopyTo(utf8Destination[bytesWritten..]);
+            bytesWritten += digitCount;
+        }
+
+        return true;
+    }
+
+    public static Oid Parse(string s, IFormatProvider? provider)
+    {
+        ArgumentNullException.ThrowIfNull(s);
+        return new Oid(Parse(s.AsSpan()));
+    }
+
+    public static Oid Parse(ReadOnlySpan<char> s, IFormatProvider? provider) =>
+        new(Parse(s));
+
+    public static bool TryParse(string? s, IFormatProvider? provider, out Oid result)
+    {
+        if (s is null)
+        {
+            result = null!;
+            return false;
+        }
+
+        return TryParse(s.AsSpan(), provider, out result);
+    }
+
+    public static bool TryParse(ReadOnlySpan<char> s, IFormatProvider? provider, out Oid result)
+    {
+        try
+        {
+            result = new Oid(Parse(s));
+            return true;
+        }
+        catch (FormatException)
+        {
+            result = null!;
+            return false;
+        }
+        catch (OverflowException)
+        {
+            result = null!;
+            return false;
+        }
+    }
+
+    private static void ValidateFormat(string? format)
+    {
+        if (format is not (null or "" or "G"))
+            throw new FormatException($"The format '{format}' is not supported.");
+    }
+
+    private static void ValidateFormat(ReadOnlySpan<char> format)
+    {
+        if (!format.IsEmpty && !format.SequenceEqual("G"))
+            throw new FormatException($"The format '{format.ToString()}' is not supported.");
+    }
+
     /// <summary>
     ///     Hash value for OID value
     /// </summary>
@@ -375,34 +517,44 @@ public sealed class Oid : AsnType, ICloneable, IComparable, IEnumerable<uint>
             : data.Aggregate(0, (current, t) => current ^ (t > int.MaxValue ? int.MaxValue : (int)t));
     }
 
-    /// <summary>Parse string formatted oid value into an array of integers</summary>
+    /// <summary>Parses a dotted decimal object identifier without allocating per-arc strings.</summary>
     /// <param name="oidStr">string formatted oid</param>
-    /// <returns>Integer array representing the oid or null if invalid object id was passed</returns>
-    private static uint[] Parse(string oidStr)
+    /// <returns>Integer array representing the oid.</returns>
+    private static uint[] Parse(string oidStr) => Parse(oidStr.AsSpan());
+
+    private static uint[] Parse(ReadOnlySpan<char> oidStr)
     {
-        if (oidStr is not { Length: > 0 }) return [];
-        // verify correct values are the only ones present in the string
-        if (oidStr.Any(c => !char.IsNumber(c) && c != '.'))
+        if (oidStr.Length == 0) return [];
+        var source = oidStr;
+        if (source[0] == '.') source = source[1..];
+        if (source.IsEmpty)
+            throw new FormatException("Invalid object identifier.");
+
+        var arcCount = 1;
+        foreach (var character in source)
         {
-            return [];
+            if (character == '.')
+                arcCount++;
+            else if (character is < '0' or > '9')
+                throw new FormatException("Invalid object identifier.");
         }
 
-        oidStr = oidStr[0] switch
+        var arcs = new uint[arcCount];
+        var arcIndex = 0;
+        while (true)
         {
-            // check if oid starts with a '.' and remove it if it does
-            '.' => oidStr.Remove(0, 1),
-            _ => oidStr
-        };
+            var separator = source.IndexOf('.');
+            var arcText = separator < 0 ? source : source[..separator];
+            if (arcText.IsEmpty)
+                throw new FormatException("Invalid object identifier.");
+            if (!uint.TryParse(arcText, NumberStyles.None, CultureInfo.InvariantCulture, out arcs[arcIndex]))
+                throw new OverflowException("Object identifier arc exceeds UInt32.");
 
-        // split string into an array
-        var splitString = oidStr.Split(['.'], StringSplitOptions.None);
-
-        return splitString.Length switch
-        {
-            // if we didn't find any entries, return null
-            < 0 => [],
-            _ => splitString.Select(s => Convert.ToUInt32(s)).ToArray()
-        };
+            arcIndex++;
+            if (separator < 0)
+                return arcs;
+            source = source[(separator + 1)..];
+        }
     }
 
     /// <summary>
@@ -973,12 +1125,10 @@ public sealed class Oid : AsnType, ICloneable, IComparable, IEnumerable<uint>
         }
 
         Span<byte> tmp = stackalloc byte[sizeof(uint) * 2];
-        Span<byte> b = stackalloc byte[sizeof(uint)];
         var length = 0;
         while (number != 0)
         {
-            BitConverter.TryWriteBytes(b, number);
-            var @byte = b[0];
+            var @byte = (byte)number;
             if ((@byte & 0x80) != 0) @byte = (byte)(@byte & ~HIGH_BIT); // clear high bit
             number >>= 7; // shift original value by 7 bits
             tmp[length++] = @byte;

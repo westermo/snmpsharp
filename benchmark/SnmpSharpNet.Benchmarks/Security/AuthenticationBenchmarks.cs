@@ -4,10 +4,8 @@ using BenchmarkDotNet.Jobs;
 namespace SnmpSharpNet.Benchmarks.Security;
 
 [MemoryDiagnoser]
-[SimpleJob(RuntimeMoniker.Net90)]
-[SimpleJob(RuntimeMoniker.Net10_0)]
-[SimpleJob(RuntimeMoniker.NativeAot90)]
-[SimpleJob(RuntimeMoniker.NativeAot10_0)]
+[SimpleJob(RuntimeMoniker.Net11_0)]
+[SimpleJob(RuntimeMoniker.NativeAot11_0)]
 public class AuthenticationBenchmarks
 {
     private byte[]? _password;
