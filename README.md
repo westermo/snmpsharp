@@ -13,6 +13,19 @@ The namespace has been prefixed with `Westermo`.
 # Document
 [see wiki](https://github.com/rqx110/SnmpSharpNet/wiki) 
 
+## Benchmarks
+
+Run from the repository root with the .NET 11 SDK:
+
+```powershell
+dotnet run -c Release --project .\benchmark\SnmpSharpNet.Benchmarks
+dotnet run -c Release --project .\benchmark\SnmpSharpNet.Mib.Benchmarks -- --filter '*'
+```
+
+The first command runs the authentication benchmarks under both .NET 11 JIT and Native AOT.
+The AOT job needs the [platform's Native AOT prerequisites](https://learn.microsoft.com/dotnet/core/deploying/native-aot/#prerequisites).
+Both projects accept BenchmarkDotNet arguments after `--`, such as `--list flat` or `--filter`.
+
 ## Async UDP requests (.NET 11)
 
 UDP requests now use asynchronous socket I/O at their core:
